@@ -256,6 +256,13 @@ class OfferSchedule(models.Model):
     discount_approved_category = models.ManyToManyField(Subcategory, blank=True, related_name='approved_offers', help_text="Categories approved for discount")
     discount_not_allowed_category = models.ManyToManyField(Subcategory, blank=True, related_name='not_allowed_offers', help_text="Categories not allowed for discount")
 
+
+    def clean(self):
+        if self.offer_active:
+            active_offers = OfferSchedule.objects.filter(offer_active=True).exclude(pk=self.pk)
+            if active_offers.exists():
+                raise ValidationError(('There can only be one active offer at a time.'))
+
     def __str__(self):
         return f"Offer {self.pk}"
 
