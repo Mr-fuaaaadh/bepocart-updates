@@ -412,32 +412,25 @@ class CustomerCartProducts(APIView):
                 matched_product_pks = [product_pk for product_pk in products_in_cart 
                        if product_pk in offer_approved_products or product_pk in approved_category_product_pks]
                 
-                print("Offer Approved Cart products   :",matched_product_pks)
-
                 # Find products in cart that are either approved for discount or  categories
                 allowed_discount_products = [product_pk for product_pk in products_in_cart 
                                             if product_pk in discount_approved_products or product_pk in approved_discount_category_product_pks]
-                
-                print("Discount Allowd All Products  :",allowed_discount_products)
-                
+                            
                 if offer.is_active:
                     try:
                         # Fetch the first active OfferSchedule object
                         offer_schedule = OfferSchedule.objects.filter(offer_active=True).first()
                         if offer_schedule:
-                            print(f"BUY ONE GET ONE ")
                             if offer_schedule.offer_type == "BUY" and offer_schedule.method == "FREE":
                                 # Retrieve the buy and get values
                                 buy = offer_schedule.get_option
                                 get = offer_schedule.get_value
-                                print("BUY:", buy, "GET:", get)
 
                                 # Combine matched product pks with allowed discount products
                                 if matched_product_pks:
                                     combined_product_pks = set(matched_product_pks).union(set(allowed_discount_products))
                                 else:
                                     combined_product_pks = set(approved_category_product_pks)
-                                print("Combined Product PKs:", combined_product_pks)
 
                                 # Get user cart items
                                 user_cart = Cart.objects.filter(customer=user)
@@ -523,7 +516,6 @@ class CustomerCartProducts(APIView):
                                 combined_product_pks = set(matched_product_pks).union(set(allowed_discount_products))
                                 user_cart = Cart.objects.filter(customer=user, product__in=combined_product_pks)
 
-
                                 offer_products = []
                                 discount_allowed_products = []
 
@@ -531,48 +523,52 @@ class CustomerCartProducts(APIView):
                                 discount_allowed_products_data = Product.objects.filter(pk__in=allowed_discount_products)
 
                                 intersection_products = offer_products_data.filter(pk__in=discount_allowed_products_data.values('pk'))
-                                print("Intersection Productsssssss:", intersection_products)
+                                print("Intersection Products:", intersection_products)
 
                                 if intersection_products.exists():
-                                    for item in user_cart:
-                                        if item.product in matched_product_pks:
-                                            offer_products.append(item.product)
-                                        if item.product in allowed_discount_products:
-                                            discount_allowed_products.append(item.product)
-
-                                    print("Offer Products:", offer_products)
-                                    print("Discount Allowed Products:", discount_allowed_products)
-
+                                    print("-------------------------------------------SAME PRODUCTS OFFER AND DISCOUNT IS AVAILABLE----------------------------------------")
+                                
                                     total_free_quantity = 0
-                                    for item in user_cart:
+                                    for item in cart:
                                         if item.product.pk in matched_product_pks:
                                             free_quantity = (item.quantity) * get
                                         else:
                                             free_quantity = 0
                                         total_quantity = item.quantity + free_quantity
                                         total_price = item.product.salePrice * item.quantity
-                                        print(f"Item: {item.product.pk}, Quantity: {item.quantity}, Total Quantity : {total_quantity}, Total Price: {total_price}")
 
+                                        if item.product.pk in matched_product_pks:
+                                            offer_products.append(item)
+                                        if item.product.pk in allowed_discount_products:
+                                            discount_allowed_products.append(item)
 
-                                    print("Total Free Quantity:", total_free_quantity)
+                                        print(f"Item: {item.product.pk}, Free Quantity: {free_quantity}, Total Quantity: {total_quantity}, Total Price: {total_price}")
+                                        
 
                                     total_sale_price = sum(i.product.salePrice * i.quantity for i in cart)
                                     sub_total_sale_price = sum(i.product.price * i.quantity for i in cart)
 
                                     print("Total Sale Price:", total_sale_price)
-                                    print("Subtotal Sale Price:", sub_total_sale_price)
+                                    print("Sub Total Sale Price:", sub_total_sale_price)
+
 
                                     if discount_allowed_products:
                                         discount_allowed_products.sort(key=lambda i: i.product.salePrice)
                                         offer_products_in_cart = user_cart.filter(product__in=matched_product_pks)
                                         remaining_free_quantity = sum(i.quantity for i in offer_products_in_cart)
-                                        total_free_quantity = int(remaining_free_quantity / buy) * get
+                                        total_free_quantity = int(remaining_free_quantity / 2) * get
+
+                                        print("Total Free Quantity:", total_free_quantity)
+                                        total_discount = 0  
 
                                         total_cart_value = total_sale_price
                                         for item in discount_allowed_products:
                                             product = item.product
                                             product_price = product.salePrice
                                             product_quantity = item.quantity
+
+                                            print(f"Product: {product.pk}, Product Price: {product_price}, Product Quantity: {product_quantity}")
+
 
                                             if total_free_quantity <= 0:
                                                 break
@@ -586,9 +582,16 @@ class CustomerCartProducts(APIView):
                                                 total_cart_value -= discount_amount
                                                 total_free_quantity = 0
 
+                                            total_discount += discount_amount  # Accumulate discount amount
+                                            print(f"Discount Amount: {discount_amount}, Total Cart Value: {total_cart_value}, Remaining Free Quantity: {total_free_quantity}")
+
+
                                         serializer = CartSerializers(cart, many=True)
                                         total_discount_after_adjustment = sub_total_sale_price - total_cart_value
                                         shipping_fee = 60 if total_cart_value <= 500 else 0
+
+                                        print("Total after udgestment   :",total_cart_value)
+
 
                                         response_data = {
                                             "status": "User cart products",
@@ -599,17 +602,10 @@ class CustomerCartProducts(APIView):
                                             "Subtotal": total_cart_value
                                         }
 
-
                                         return Response(response_data, status=status.HTTP_200_OK)
 
                                 else:
-
-                                    for item in user_cart:
-                                        if item.product in matched_product_pks:
-                                            offer_products.append(item.product)
-                                        if item.product in allowed_discount_products:
-                                            discount_allowed_products.append(item.product)
-
+                                    print("-------------------------------------------SAME PRODUCTS OFFER AND DISCOUNT IS NOT AVAILABLE----------------------------------------")
                                     total_free_quantity = 0
                                     for item in user_cart:
                                         if item.product.pk in matched_product_pks:
@@ -618,28 +614,37 @@ class CustomerCartProducts(APIView):
                                             free_quantity = 0
                                         total_quantity = item.quantity + free_quantity
                                         total_price = item.product.salePrice * item.quantity
-                                        print(f"Item: {item.product.pk}, Quantity: {item.quantity}, Total Quantity : {total_quantity}, Total Price: {total_price}")
 
-                                    
+                                        if item.product.pk in matched_product_pks:
+                                            offer_products.append(item)
+                                        if item.product.pk in allowed_discount_products:
+                                            discount_allowed_products.append(item)
+
+                                        print(f"Item: {item.product.pk}, Free Quantity: {free_quantity}, Total Quantity: {total_quantity}, Total Price: {total_price}")
 
                                     total_sale_price = sum(i.product.salePrice * i.quantity for i in cart)
                                     sub_total_sale_price = sum(i.product.price * i.quantity for i in cart)
 
-                                    print("Total Sale Price (No Intersection):", total_sale_price)
-                                    print("Subtotal Sale Price (No Intersection):", sub_total_sale_price)
+                                    print("Total Sale Price:", total_sale_price)
+                                    print("Sub Total Sale Price:", sub_total_sale_price)
 
                                     if discount_allowed_products:
                                         discount_allowed_products.sort(key=lambda i: i.product.salePrice)
+
                                         offer_products_in_cart = user_cart.filter(product__in=matched_product_pks)
                                         remaining_free_quantity = sum(i.quantity for i in offer_products_in_cart)
                                         total_free_quantity = int(remaining_free_quantity) * get
-                                        print(remaining_free_quantity)
+
+                                        print("Total Free Quantity:", total_free_quantity)
 
                                         total_cart_value = total_sale_price
+                                        total_discount = 0  # Initialize total discount
                                         for item in discount_allowed_products:
                                             product = item.product
                                             product_price = product.salePrice
                                             product_quantity = item.quantity
+
+                                            print(f"Product: {product.pk}, Product Price: {product_price}, Product Quantity: {product_quantity}")
 
                                             if total_free_quantity <= 0:
                                                 break
@@ -653,11 +658,14 @@ class CustomerCartProducts(APIView):
                                                 total_cart_value -= discount_amount
                                                 total_free_quantity = 0
 
-                                        ("Total Free Quantity (No Intersection):", total_free_quantity)
-                                        
+                                            total_discount += discount_amount  # Accumulate discount amount
+                                            print(f"Discount Amount: {discount_amount}, Total Cart Value: {total_cart_value}, Remaining Free Quantity: {total_free_quantity}")
+
                                         serializer = CartSerializers(cart, many=True)
                                         total_discount_after_adjustment = sub_total_sale_price - total_cart_value
                                         shipping_fee = 60 if total_cart_value <= 500 else 0
+
+                                        print("Total after udgestment   :",total_cart_value)
 
                                         response_data = {
                                             "status": "User cart products",
@@ -665,10 +673,12 @@ class CustomerCartProducts(APIView):
                                             "Discount": total_discount_after_adjustment,
                                             "Shipping": shipping_fee,
                                             "TotalPrice": sub_total_sale_price,
-                                            "Subtotal": total_cart_value
+                                            "Subtotal": total_cart_value,
+                                            "TotalDiscount": total_discount  # Include total discount in response
                                         }
 
                                         return Response(response_data, status=status.HTTP_200_OK)
+
 
                             elif offer_schedule.offer_type == "SPEND" and offer_schedule.method == "% OFF":
                                 print("Offer coming soon for SPEND % OFF")
@@ -682,6 +692,7 @@ class CustomerCartProducts(APIView):
                     except Exception as e:
                         print("An error occurred:", e)
                         return Response({"message": "An error occurred during offer processing"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
             serializer = CartSerializers(cart, many=True)
 
