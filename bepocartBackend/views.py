@@ -2,6 +2,7 @@ import razorpay
 import logging
 import jwt
 import hashlib
+from django.shortcuts import render
 from django.db.models import Avg,Sum, Count
 import requests
 from django.shortcuts import get_object_or_404
@@ -36,6 +37,8 @@ from django.core.exceptions import ValidationError
 from rest_framework.exceptions import ValidationError as DRFValidationError
 from .utils import *
 from django.core.cache import cache
+
+logger = logging.getLogger(__name__)
 
 class CustomerRegistration(APIView):
     def post(self, request):
@@ -113,6 +116,7 @@ class GoogleLoginAPIView(APIView):
         except Exception as e:
             logger.error(f"Unexpected Error: {str(e)}", exc_info=True)
             return Response({'error': 'An unexpected error occurred. Please try again later.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
 class CustomerLogin(APIView):
     def post(self, request):
         serializer = CustomerLoginSerializer(data=request.data)
@@ -1556,6 +1560,7 @@ class CreateOrder(APIView):
                         # Retrieve the buy and get values
                         buy = offer.get_option
                         get = offer.get_value
+                        
 
                         # Combine matched product pks with allowed discount products
                         if matched_product_pks:
@@ -1608,193 +1613,129 @@ class CreateOrder(APIView):
                         if not address:
                             return Response({"message": "Address not found"}, status=status.HTTP_404_NOT_FOUND)
 
+                        total_amount = total_sale_price
+                        
+                        
                         coupon_code = request.data.get('coupon_code')
-                        coupon = None
-                        if coupon_code:
-                            try:
-                                coupon = Coupon.objects.get(code=coupon_code)
-                            except Coupon.DoesNotExist:
-                                return Response({"message": "Invalid coupon code"}, status=status.HTTP_400_BAD_REQUEST)
+                        coupon = None  # Initialize coupon as None
 
-                            if coupon.status != 'Active':
+                        if coupon_code:
+                            coupon = Coupon.objects.filter(code=coupon_code).first()
+                            if not coupon or coupon.status != 'Active':
                                 return Response({"message": "Invalid or inactive coupon"}, status=status.HTTP_400_BAD_REQUEST)
+
+                        # Calculate the total amount before applying the coupon
+                        try:
+                            if coupon:
+                                discount_amount = apply_coupon(coupon.code, total_amount, cart_items)
+                                total_amount -= discount_amount
+                        except ValueError as e:
+                            return Response({"message": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
                         payment_method = request.data.get('payment_method')
                         if not payment_method:
                             return Response({"message": "Payment method is required"}, status=status.HTTP_400_BAD_REQUEST)
                         if payment_method not in ['COD', 'razorpay']:
                             return Response({"message": "Invalid payment method"}, status=status.HTTP_400_BAD_REQUEST)
-
-                        try:
-                            with transaction.atomic():
-                                order = Order.objects.create(
-                                    customer=user,
-                                    address=address,
-                                    status='pending',
-                                    payment_method=payment_method,
-                                    free_quantity=total_combined_free_quantity
-                                )
-
-                                for item in user_cart:
-                                    # Fetch active offers related to the product or its category
-                                    offers = OfferSchedule.objects.filter(
-                                        Q(offer_active=True) &
-                                        (Q(offer_products=item.product.pk) | Q(offer_category=item.product.category.pk))
-                                    )
-
-                                    # Collect offer details (assuming you want to use the first offer if multiple are found)
-                                    offer_details = []
-                                    for offer in offers:
-                                        offer_detail = f"{offer.offer_type} {offer.get_option} GET {offer.get_value} {offer.method}"
-                                        offer_details.append(offer_detail)
-
-                                    # Use the first offer detail or a combined string if there are multiple offers
-                                    offer_type_string = ", ".join(offer_details) if offer_details else "No offer"
-
-                                    # Create the order item with offer details
-                                    OrderItem.objects.create(
-                                        customer=user,
-                                        order=order,
-                                        product=item.product,
-                                        quantity=item.quantity,
-                                        price=item.product.salePrice,
-                                        color=item.color,
-                                        size=item.size,
-                                        offer_type=offer_type_string  # Include the offer details in the order item
-                                    )
-
-                                    if item.product.type == "single":
-                                        check_color = ProductColorStock.objects.filter(product=item.product, color=item.color)
-                                        if check_color is None :
-                                            return Response({"message": "Color not found"}, status=status.HTTP_400_BAD_REQUEST)
-                                        for stock in check_color :
-                                            if stock.stock >= item.quantity:
-                                                stock.stock -= item.quantity
-                                                stock.save()
-
-                                    else :
-                                        product_variants = ProductVariant.objects.filter(product=item.product, color=item.color)
-
-                                        if not product_variants.exists():
-                                            return Response({"message": f"No variants found for {item.product.name} - {item.color}"}, status=status.HTTP_404_NOT_FOUND)
-
-                                        for variant in product_variants:
-                                            # Filter the size stocks related to the current variant
-                                            size_stocks = ProductVarientSizeStock.objects.filter(product_variant=variant, size=item.size)
-                                            
-                                            for stock in size_stocks:
-                                                if stock.stock >= item.quantity:
-                                                    # Update stock
-                                                    stock.stock -= item.quantity
-                                                    stock.save()
-                                                    break  # Break out of the inner loop if stock is updated
-                                                else:
-                                                    return Response({"message": f"Insufficient stock for {item.product.name} - {item.color} - {item.size}"}, status=status.HTTP_400_BAD_REQUEST)
-
-
-                                cart_items_list = [
-                                {
-                                    'product_name': item.product.name,
-                                    'quantity': item.quantity,
-                                    'price': item.product.salePrice,
-                                    'image':item.product.image.url
-                                }
-                                for item in cart_items
-
-                                ]
-
-                                try:
-                                    # Initial check for total amount and apply shipping charge if applicable
-                                    if total_sale_price is None or not isinstance(total_sale_price, Decimal):
-                                        return Response({"error": "Invalid total amount."}, status=status.HTTP_400_BAD_REQUEST)
-
-                                    if total_sale_price <= Decimal('500.00'):
-                                        shipping_charge = Decimal('60.00')
-                                        order.shipping_charge = shipping_charge
-                                        total_sale_price += shipping_charge
-
-
-
-                                    # Apply the coupon if present
-                                    if coupon:
-                                        try:
-                                            if coupon.coupon_type == 'Percentage':
-                                                discount_amount = (coupon.discount / 100) * total_sale_price
-                                            elif coupon.coupon_type == 'Fixed Amount':
-                                                discount_amount = coupon.discount
-                                            else:
-                                                return Response({"error": "Invalid coupon type."}, status=status.HTTP_400_BAD_REQUEST)
-
-                                            if discount_amount > total_sale_price:
-                                                return Response({"error": "Discount exceeds total amount."}, status=status.HTTP_400_BAD_REQUEST)
-
-                                            total_sale_price -= discount_amount
-                                            order.coupon = coupon
-
-
-                                        except Exception as e:
-                                            logging.error(f"Error applying coupon: {e}")
-                                            return Response({"error": "Error applying coupon.", "details": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-                                    # Add COD charge if payment method is COD
-                                    if payment_method == 'COD':
-                                        cod_charge = Decimal('40.00')
-                                        total_sale_price += cod_charge
-
-                                        order.cod_charge = cod_charge
-
-
-
-
-
-                                    # If payment method is Razorpay, create a Razorpay order
-                                    if payment_method == 'razorpay':
-                                        razorpay_client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
-                                        try:
-                                            razorpay_order = razorpay_client.order.create({
-                                                'amount': int(total_sale_price * 100),
-                                                'currency': 'INR',
-                                                'payment_capture': 1
-                                            })
-                                            razorpay_order_id = razorpay_order['id']
-                                            order.razorpay_order_id = razorpay_order_id
-                                            order.save()
-                                            return Response({
-                                                "message": "Razorpay order created successfully.",
-                                                "razorpay_order_id": razorpay_order_id,
-                                                "order_id": order.order_id
-                                            }, status=status.HTTP_200_OK)
-                                        except Exception as e:
-                                            logging.error(f"Razorpay order creation error: {e}")
-                                            return Response({"error": "Error creating Razorpay order.", "details": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-                                    order.total_amount = total_sale_price
-                                    order.save()
-                                    try:
-                                        order.save()
-                                        cart_items.delete()
-                                        try:
-                                            email_subject = 'New Order Created'
-                                            email_body = render_to_string('new_order.html', {'order': order, 'user_cart': cart_items_list,'customer':address})
-                                            email = EmailMessage(subject=email_subject, body=email_body, from_email=settings.EMAIL_HOST_USER, to=[settings.EMAIL_HOST_USER])
-                                            email.content_subtype = 'html'
-                                            email.send()
-                                        except Exception as email_error:
-                                            logging.error(f"Error sending email: {email_error}")
-                                            return Response({"message": "Order saved but failed to send email.", "data": OrderSerializer(order).data}, status=status.HTTP_201_CREATED)
-
-                                        # Return success response
-                                        serializer = OrderSerializer(order)
-                                        return Response({"message": "Order success", "data": serializer.data}, status=status.HTTP_201_CREATED)
-                                    except Exception as e:
-                                        logging.error(f"Error saving order: {e}")
-                                        return Response({"message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-                                except Exception as e:
-                                    logging.error(f"Unexpected error: {e}")
-                                    return Response({"message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                
+                        
+                        cart_items_list = [
+            
+                            {
                                 
+                                'name': item.product.name,
+                                'quantity': item.quantity,
+                                'price': item.product.salePrice,
+                                'image':item.product.image.url
+                            }
+                            
+                            for item in cart_items]
+                        try:
+                            if payment_method == "COD":
+                                with transaction.atomic():
+                                    order = Order.objects.create(
+                                        customer=user,
+                                        address=address,
+                                        status='pending',
+                                        payment_method=payment_method,
+                                        free_quantity=total_combined_free_quantity,
+                                        coupon=coupon if coupon else None 
+
+                                    )
+
+                                    for item in user_cart:
+                                        # Fetch active offers related to the product or its category
+                                        offers = OfferSchedule.objects.filter(
+                                            Q(offer_active=True) &
+                                            (Q(offer_products=item.product.pk) | Q(offer_category=item.product.category.pk))
+                                        )
+
+                                        # Collect offer details (assuming you want to use the first offer if multiple are found)
+                                        offer_details = []
+                                        for offer in offers:
+                                            offer_detail = f"{offer.offer_type} {offer.get_option} GET {offer.get_value} {offer.method}"
+                                            offer_details.append(offer_detail)
+
+                                        # Use the first offer detail or a combined string if there are multiple offers
+                                        offer_type_string = ", ".join(offer_details) if offer_details else "No offer"
+
+                                        # Create the order item with offer details
+                                        OrderItem.objects.create(
+                                            customer=user,
+                                            order=order,
+                                            product=item.product,
+                                            quantity=item.quantity,
+                                            price=item.product.salePrice,
+                                            color=item.color,
+                                            size=item.size,
+                                            offer_type=offer_type_string  # Include the offer details in the order item
+                                        )
+
+                                        if item.product.type == "single":
+                                            check_color = ProductColorStock.objects.filter(product=item.product, color=item.color)
+                                            if not check_color.exists():
+                                                return Response({"message": "Color not found"}, status=status.HTTP_400_BAD_REQUEST)
+                                            update_single_product_stock(check_color, item)
+                                        else:
+                                            update_variant_stock(item)
+                                            
+                                
+
+                                # Determine shipping charge based on total_amount
+                                if total_amount <= Decimal('500.00'):
+                                    order.shipping_charge = Decimal('60.00')
+                                else:
+                                    order.shipping_charge = Decimal('0.00')
+
+                                # Add COD charge
+                                order.cod_charge = Decimal('40.00')
+                                total_amount += order.shipping_charge + order.cod_charge
+
+                                # Update order total amount and save
+                                order.total_amount = total_amount
+                                order.save()
+
+                                # Send order email and delete cart items
+                                send_order_email(order, cart_items_list)
+                                cart_items.delete()
+
+                                # Serialize the order data and return response
+                                serializer = OrderSerializer(order)
+                                return Response({"message": "Order success", "data": serializer.data}, status=status.HTTP_201_CREATED)
+
+
+                            else:
+                                logging.info(f"Total amount before applying shipping and coupon: {total_amount}")
+
+                                # Create a Razorpay order
+                                razorpay_order_id = create_razorpay_order(total_amount)
+                                
+                                return Response({
+                                    "message": "Razorpay order created successfully.",
+                                    "razorpay_order_id": razorpay_order_id,
+                                }, status=status.HTTP_200_OK)   
                         except Exception as e:
+                            logging.info(f"error {e}")
                             return Response({"message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
                     else:
                         try:
@@ -1837,134 +1778,126 @@ class CreateOrder(APIView):
                             if not address:
                                 return Response({"message": "Address not found"}, status=status.HTTP_404_NOT_FOUND)
 
+                            total_amount = total_cart_value_after_discount
+                            
+                            
                             coupon_code = request.data.get('coupon_code')
-                            coupon = None
+                            coupon = None  # Initialize coupon as None
+
                             if coupon_code:
-                                try:
-                                    coupon = Coupon.objects.get(code=coupon_code)
-                                    if coupon.status != 'Active':
-                                        raise Coupon.DoesNotExist
-                                except Coupon.DoesNotExist:
+                                coupon = Coupon.objects.filter(code=coupon_code).first()
+                                if not coupon or coupon.status != 'Active':
                                     return Response({"message": "Invalid or inactive coupon"}, status=status.HTTP_400_BAD_REQUEST)
 
+                            # Calculate the total amount before applying the coupon
+                            try:
+                                if coupon:
+                                    discount_amount = apply_coupon(coupon.code, total_amount, cart_items)
+                                    total_amount -= discount_amount
+                            except ValueError as e:
+                                return Response({"message": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
                             payment_method = request.data.get('payment_method')
-                            if not payment_method or payment_method not in ['COD', 'razorpay']:
-                                return Response({"message": "Invalid or missing payment method"}, status=status.HTTP_400_BAD_REQUEST)
-
-                            with transaction.atomic():
-                                order = Order.objects.create(
-                                    customer=user,
-                                    address=address,
-                                    status='pending',
-                                    payment_method=payment_method,
-                                )
-
-                                for item in user_cart:
-                                    # Fetch active offers related to the product or its category (including subcategories)
-                                    offers = OfferSchedule.objects.filter(
-                                                Q(offer_products=item.product.pk) | Q(offer_category=item.product.category.pk),
-                                                offer_active=True  
-                                            )
-                                    # Collect offer details (assuming you want to use the first offer if multiple are found)
-                                    offer_details = [f"{offer.offer_type} {offer.amount} {offer.discount_percentage} {offer.method}" for offer in offers]
-                                    offer_type_string = ", ".join(offer_details) if offer_details else "No offer"
-
-                                    # Create the order item with offer details
-                                    OrderItem.objects.create(
+                            if not payment_method:
+                                return Response({"message": "Payment method is required"}, status=status.HTTP_400_BAD_REQUEST)
+                            if payment_method not in ['COD', 'razorpay']:
+                                return Response({"message": "Invalid payment method"}, status=status.HTTP_400_BAD_REQUEST)
+                        
+                        
+                            
+                            cart_items_list = [
+            
+                                    {
+                                        
+                                        'name': item.product.name,
+                                        'quantity': item.quantity,
+                                        'price': item.product.salePrice,
+                                        'image':item.product.image.url
+                                    }
+                                    
+                                    for item in cart_items]
+                            
+                            if payment_method == 'COD': 
+                                with transaction.atomic():
+                                    order = Order.objects.create(
                                         customer=user,
-                                        order=order,
-                                        product=item.product,
-                                        quantity=item.quantity,
-                                        price=item.product.salePrice,
-                                        color=item.color,
-                                        size=item.size,
-                                        offer_type=offer_type_string  
+                                        address=address,
+                                        status='pending',
+                                        payment_method=payment_method,
+                                        coupon=coupon if coupon else None 
+
                                     )
 
-                                    # Update stock based on the product type
-                                    if item.product.type == "single":
-                                        check_color = ProductColorStock.objects.filter(product=item.product, color=item.color)
-                                        if not check_color.exists():
-                                            return Response({"message": "Color not found"}, status=status.HTTP_400_BAD_REQUEST)
+                                    for item in user_cart:
+                                        # Fetch active offers related to the product or its category (including subcategories)
+                                        offers = OfferSchedule.objects.filter(
+                                                    Q(offer_products=item.product.pk) | Q(offer_category=item.product.category.pk),
+                                                    offer_active=True  
+                                                )
+                                        # Collect offer details (assuming you want to use the first offer if multiple are found)
+                                        offer_details = [f"{offer.offer_type} {offer.amount} {offer.discount_percentage} {offer.method}" for offer in offers]
+                                        offer_type_string = ", ".join(offer_details) if offer_details else "No offer"
 
-                                        for stock in check_color:
-                                            if stock.stock >= item.quantity:
-                                                stock.stock -= item.quantity
-                                                stock.save()
-                                    else:
-                                        product_variants = ProductVariant.objects.filter(product=item.product, color=item.color)
-                                        if not product_variants.exists():
-                                            return Response({"message": f"No variants found for {item.product.name} - {item.color}"}, status=status.HTTP_404_NOT_FOUND)
+                                        # Create the order item with offer details
+                                        OrderItem.objects.create(
+                                            customer=user,
+                                            order=order,
+                                            product=item.product,
+                                            quantity=item.quantity,
+                                            price=item.product.salePrice,
+                                            color=item.color,
+                                            size=item.size,
+                                            offer_type=offer_type_string  
+                                        )
 
-                                        for variant in product_variants:
-                                            size_stocks = ProductVarientSizeStock.objects.filter(product_variant=variant, size=item.size)
-                                            for stock in size_stocks:
-                                                if stock.stock >= item.quantity:
-                                                    stock.stock -= item.quantity
-                                                    stock.save()
-                                                    break
-                                                else:
-                                                    return Response({"message": f"Insufficient stock for {item.product.name} - {item.color} - {item.size}"}, status=status.HTTP_400_BAD_REQUEST)
+                                        # Update stock based on the product type
+                                        if item.product.type == "single":
+                                            check_color = ProductColorStock.objects.filter(product=item.product, color=item.color)
+                                            if not check_color.exists():
+                                                return Response({"message": "Color not found"}, status=status.HTTP_400_BAD_REQUEST)
+                                            update_single_product_stock(check_color, item)
+                                        else:
+                                            update_variant_stock(item)
+                                            
 
-                                # Apply the coupon if present
-                                if coupon:
-                                    discount_amount = (coupon.discount / 100) * total_cart_value_after_discount if coupon.coupon_type == 'Percentage' else coupon.discount
-                                    total_cart_value_after_discount -= discount_amount
-                                    order.coupon = coupon
 
-                                if payment_method == 'COD':
-                                    cod_charge = Decimal('40.00')
-                                    order.cod_charge = cod_charge
-                                    total_cart_value_after_discount += cod_charge
+                                # Determine shipping charge based on total_amount
+                                if total_amount <= Decimal('500.00'):
+                                    order.shipping_charge = Decimal('60.00')
+                                else:
+                                    order.shipping_charge = Decimal('0.00')
 
-                                # If payment method is Razorpay, create a Razorpay order
-                                if payment_method == 'razorpay':
-                                    razorpay_client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
-                                    try:
-                                        razorpay_order = razorpay_client.order.create({
-                                            'amount': int(total_cart_value_after_discount * 100),
-                                            'currency': 'INR',
-                                            'payment_capture': 1
-                                        })
-                                        razorpay_order_id = razorpay_order['id']
-                                        order.razorpay_order_id = razorpay_order_id
-                                        order.save()
-                                        return Response({
-                                            "message": "Razorpay order created successfully.",
-                                            "razorpay_order_id": razorpay_order_id,
-                                            "order_id": order.order_id
-                                        }, status=status.HTTP_200_OK)
-                                    except Exception as e:
-                                        logging.error(f"Razorpay order creation error: {e}")
-                                        return Response({"error": "Error creating Razorpay order.", "details": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                                # Add COD charge
+                                order.cod_charge = Decimal('40.00')
+                                total_amount += order.shipping_charge + order.cod_charge
 
-                                order.total_amount = total_cart_value_after_discount
+                                # Update order total amount and save
+                                order.total_amount = total_amount
                                 order.save()
-                                try:
-                                    order.save()
-                                    cart_items.delete()
 
-                                    # Send order creation email
-                                    try:
-                                        email_subject = 'New Order Created'
-                                        email_body = render_to_string('new_order.html', {'order': order, 'user_cart': cart_items_list,'customer':address})
-                                        email = EmailMessage(subject=email_subject, body=email_body, from_email=settings.EMAIL_HOST_USER, to=[settings.EMAIL_HOST_USER])
-                                        email.content_subtype = 'html'
-                                        email.send()
-                                    except Exception as email_error:
-                                        logging.error(f"Error sending email: {email_error}")
-                                        return Response({"message": "Order saved but failed to send email.", "data": OrderSerializer(order).data}, status=status.HTTP_201_CREATED)
+                                # Send order email and delete cart items
+                                send_order_email(order, cart_items_list)
+                                cart_items.delete()
 
-                                    # Return success response
-                                    serializer = OrderSerializer(order)
-                                    return Response({"message": "Order success", "data": serializer.data}, status=status.HTTP_201_CREATED)
-                                except Exception as e:
-                                    logging.error(f"Error saving order: {e}")
-                                    return Response({"message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                                # Serialize the order data and return response
+                                serializer = OrderSerializer(order)
+                                return Response({"message": "Order success", "data": serializer.data}, status=status.HTTP_201_CREATED)
+
+                            else:
+                                logging.info(f"Total amount before applying shipping and coupon: {total_amount}")
+
+                                # Create a Razorpay order
+                                razorpay_order_id = create_razorpay_order(total_amount)
+                                return Response({
+                                    "message": "Razorpay order created successfully.",
+                                    "razorpay_order_id": razorpay_order_id,
+                                }, status=status.HTTP_200_OK)        
                         except Exception as e:
+                            logging.info(f"error {e}")
                             return Response({"message": f"An error occurred during order processing: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
                 except Exception as e:
+                    logging.info(f"error {e}")
                     return Response({"message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
             else:
@@ -2036,212 +1969,145 @@ class CreateOrder(APIView):
                                 if not address:
                                     return Response({"message": "Address not found"}, status=status.HTTP_404_NOT_FOUND)
 
+                                total_amount = total_cart_value
+                                
+                                
                                 coupon_code = request.data.get('coupon_code')
-                                coupon = None
-                                if coupon_code:
-                                    try:
-                                        coupon = Coupon.objects.get(code=coupon_code)
-                                    except Coupon.DoesNotExist:
-                                        return Response({"message": "Invalid coupon code"}, status=status.HTTP_400_BAD_REQUEST)
+                                coupon = None  # Initialize coupon as None
 
-                                    if coupon.status != 'Active':
+                                if coupon_code:
+                                    coupon = Coupon.objects.filter(code=coupon_code).first()
+                                    if not coupon or coupon.status != 'Active':
                                         return Response({"message": "Invalid or inactive coupon"}, status=status.HTTP_400_BAD_REQUEST)
+
+                                # Calculate the total amount before applying the coupon
+                                try:
+                                    if coupon:
+                                        discount_amount = apply_coupon(coupon.code, total_amount, cart_items)
+                                        total_amount -= discount_amount
+                                except ValueError as e:
+                                    return Response({"message": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
                                 payment_method = request.data.get('payment_method')
                                 if not payment_method:
                                     return Response({"message": "Payment method is required"}, status=status.HTTP_400_BAD_REQUEST)
                                 if payment_method not in ['COD', 'razorpay']:
                                     return Response({"message": "Invalid payment method"}, status=status.HTTP_400_BAD_REQUEST)
-
-                                try:
-                                    with transaction.atomic():
-                                        order = Order.objects.create(
-                                            customer=user,
-                                            address=address,
-                                            status='pending',
-                                            payment_method=payment_method,
-
-                                        )
-
-                                        for item in cart_items:
-                                            # Fetch active offers related to the product or its category
-                                            offers = OfferSchedule.objects.filter(
-                                                Q(offer_active=True) &
-                                                (Q(offer_products=item.product.pk) | Q(offer_category=item.product.category.pk))
-                                            )
-                                            
-                                            # Fetch discount-approved products or categories
-                                            discount_products = OfferSchedule.objects.filter(
-                                                Q(offer_active=True) & Q(is_active=False) &
-                                                (Q(discount_approved_products=item.product.pk) | Q(discount_approved_category=item.product.category.pk))
-                                            )
-
-                                            # Collect offer details
-                                            offer_details = []
-                                            for offer in offers:
-                                                offer_detail = f"{offer.offer_type} {offer.get_option} GET {offer.get_value} {offer.method}"
-                                                offer_details.append(offer_detail)
-
-                                            # Collect discount details
-                                            discount_details = []
-                                            if discount_products.exists():
-                                                discount_details.append("Discount Allowed")
-
-                                            # Combine offer and discount details into a single string
-                                            offer_type_string = ", ".join(offer_details + discount_details) if offer_details or discount_details else "No offer"
-
-                                            # Create the order item with offer details
-                                            OrderItem.objects.create(
-                                                customer=user,
-                                                order=order,
-                                                product=item.product,
-                                                quantity=item.quantity,
-                                                price=item.product.salePrice,
-                                                color=item.color,
-                                                size=item.size,
-                                                offer_type=offer_type_string  # Include the offer details in the order item
-                                            )
-
-                                            if item.product.type == "single":
-                                                check_color = ProductColorStock.objects.filter(product=item.product, color=item.color)
-                                                if check_color is None:
-                                                    return Response({"message": "Color not found"}, status=status.HTTP_400_BAD_REQUEST)
-                                                for stock in check_color:
-                                                    if stock.stock >= item.quantity:
-                                                        stock.stock -= item.quantity
-                                                        stock.save()
-                                            else:
-                                                product_variants = ProductVariant.objects.filter(product=item.product, color=item.color)
-                                                if not product_variants.exists():
-                                                    return Response({"message": f"No variants found for {item.product.name} - {item.color}"}, status=status.HTTP_404_NOT_FOUND)
-
-                                                for variant in product_variants:
-                                                    size_stocks = ProductVarientSizeStock.objects.filter(product_variant=variant, size=item.size)
-                                                    for stock in size_stocks:
-                                                        if stock.stock >= item.quantity:
-                                                            stock.stock -= item.quantity
-                                                            stock.save()
-                                                            break
-                                                        else:
-                                                            return Response({"message": f"Insufficient stock for {item.product.name} - {item.color} - {item.size}"}, status=status.HTTP_400_BAD_REQUEST)
-
-                                        cart_items_list = [
+                                
+                                
+                                cart_items_list = [
+            
                                         {
-                                            'product_name': item.product.name,
+                                            
+                                            'name': item.product.name,
                                             'quantity': item.quantity,
                                             'price': item.product.salePrice,
                                             'image':item.product.image.url
                                         }
-                                        for item in cart_items
-
-                                        ]
                                         
-
-                                        try:
-                                            # Initial check for total amount and apply shipping charge if applicable
-                                            if total_cart_value is None or not isinstance(total_cart_value, Decimal):
-                                                return Response({"error": "Invalid total amount."}, status=status.HTTP_400_BAD_REQUEST)
-
-                                            if total_cart_value <= Decimal('500.00'):
-                                                shipping_charge = Decimal('60.00')
-                                                order.shipping_charge = shipping_charge
-                                                total_cart_value += shipping_charge
-
-
-
-
-                                            # Apply the coupon if present
-                                            if coupon:
-                                                try:
-                                                    if coupon.coupon_type == 'Percentage':
-                                                        discount_amount = (coupon.discount / 100) * total_cart_value
-                                                    elif coupon.coupon_type == 'Fixed Amount':
-                                                        discount_amount = coupon.discount
-                                                    else:
-                                                        return Response({"error": "Invalid coupon type."}, status=status.HTTP_400_BAD_REQUEST)
-
-                                                    if discount_amount > total_cart_value:
-                                                        return Response({"error": "Discount exceeds total amount."}, status=status.HTTP_400_BAD_REQUEST)
-
-                                                    total_cart_value -= discount_amount
-                                                    order.coupon = coupon
-                                                except Exception as e:
-                                                    logging.error(f"Error applying coupon: {e}")
-                                                    return Response({"error": "Error applying coupon.", "details": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-                                            # Add COD charge if payment method is COD
-
-                                            logging.debug(f"Initial total_cart_value: {total_cart_value}")
+                                        for item in cart_items]
+                                
+                                try:
+                                    if payment_method == "COD":
+                                        with transaction.atomic():
+                                            order = Order.objects.create(
+                                                customer=user,
+                                                address=address,
+                                                status='pending',
+                                                payment_method=payment_method,
+                                                coupon=coupon if coupon else None 
 
 
-                                            if payment_method == 'COD':
-                                                cod_charge = Decimal('40.00')
-                                                total_cart_value += cod_charge
+                                            )
 
-                                                order.cod_charge = cod_charge
+                                            for item in cart_items:
+                                                # Fetch active offers related to the product or its category
+                                                offers = OfferSchedule.objects.filter(
+                                                    Q(offer_active=True) &
+                                                    (Q(offer_products=item.product.pk) | Q(offer_category=item.product.category.pk))
+                                                )
+                                                
+                                                # Fetch discount-approved products or categories
+                                                discount_products = OfferSchedule.objects.filter(
+                                                    Q(offer_active=True) & Q(is_active=False) &
+                                                    (Q(discount_approved_products=item.product.pk) | Q(discount_approved_category=item.product.category.pk))
+                                                )
+
+                                                # Collect offer details
+                                                offer_details = []
+                                                for offer in offers:
+                                                    offer_detail = f"{offer.offer_type} {offer.get_option} GET {offer.get_value} {offer.method}"
+                                                    offer_details.append(offer_detail)
+
+                                                # Collect discount details
+                                                discount_details = []
+                                                if discount_products.exists():
+                                                    discount_details.append("Discount Allowed")
+
+                                                # Combine offer and discount details into a single string
+                                                offer_type_string = ", ".join(offer_details + discount_details) if offer_details or discount_details else "No offer"
+
+                                                # Create the order item with offer details
+                                                OrderItem.objects.create(
+                                                    customer=user,
+                                                    order=order,
+                                                    product=item.product,
+                                                    quantity=item.quantity,
+                                                    price=item.product.salePrice,
+                                                    color=item.color,
+                                                    size=item.size,
+                                                    offer_type=offer_type_string  # Include the offer details in the order item
+                                                )
+
+                                                if item.product.type == "single":
+                                                    check_color = ProductColorStock.objects.filter(product=item.product, color=item.color)
+                                                    if not check_color.exists():
+                                                        return Response({"message": "Color not found"}, status=status.HTTP_400_BAD_REQUEST)
+                                                    update_single_product_stock(check_color, item)
+                                                else:
+                                                    update_variant_stock(item)
+                                                    
 
 
+                                        
+                                        # Determine shipping charge based on total_amount
+                                        if total_amount <= Decimal('500.00'):
+                                            order.shipping_charge = Decimal('60.00')
+                                        else:
+                                            order.shipping_charge = Decimal('0.00')
 
-                                            # If payment method is Razorpay, create a Razorpay order
-                                            if payment_method == 'razorpay':
-                                                razorpay_client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
-                                                try:
-                                                    razorpay_order = razorpay_client.order.create({
-                                                        'amount': int(total_cart_value * 100),
-                                                        'currency': 'INR',
-                                                        'payment_capture': 1
-                                                    })
-                                                    razorpay_order_id = razorpay_order['id']
-                                                    order.razorpay_order_id = razorpay_order_id
-                                                    order.save()
-                                                    return Response({
-                                                        "message": "Razorpay order created successfully.",
-                                                        "razorpay_order_id": razorpay_order_id,
-                                                        "order_id": order.order_id
-                                                    }, status=status.HTTP_200_OK)
-                                                except Exception as e:
-                                                    logging.error(f"Razorpay order creation error: {e}")
-                                                    return Response({"error": "Error creating Razorpay order.", "details": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                                        # Add COD charge
+                                        order.cod_charge = Decimal('40.00')
+                                        total_amount += order.shipping_charge + order.cod_charge
 
-                                            order.total_amount = total_cart_value
-                                            order.save()
+                                        # Update order total amount and save
+                                        order.total_amount = total_amount
+                                        order.save()
 
-                                            try:
-                                                order.save()
-                                                logging.debug(f"Order saved successfully with total amount: {order.total_amount}")
+                                        # Send order email and delete cart items
+                                        send_order_email(order, cart_items_list)
+                                        cart_items.delete()
+
+                                        # Serialize the order data and return response
+                                        serializer = OrderSerializer(order)
+                                        return Response({"message": "Order success", "data": serializer.data}, status=status.HTTP_201_CREATED)
+
+                                    else:
+                                        logging.info(f"Total amount before applying shipping and coupon: {total_amount}")
 
 
-                                                cart_items.delete()
-
-                                                # Send order creation email
-                                                try:
-                                                    email_subject = 'New Order Created'
-                                                    email_body = render_to_string('new_order.html', {'order': order, 'user_cart': cart_items_list,'customer':address})
-                                                    email = EmailMessage(subject=email_subject, body=email_body, from_email=settings.EMAIL_HOST_USER, to=[settings.EMAIL_HOST_USER])
-                                                    email.content_subtype = 'html'
-                                                    email.send()
-                                                except Exception as email_error:
-                                                    logging.error(f"Error sending email: {email_error}")
-                                                    return Response({"message": "Order saved but failed to send email.", "data": OrderSerializer(order).data}, status=status.HTTP_201_CREATED)
-
-                                                # Return success response
-                                                serializer = OrderSerializer(order)
-                                                return Response({"message": "Order success", "data": serializer.data}, status=status.HTTP_201_CREATED)
-                                            
-                                            except Exception as e:
-                                                logging.error(f"Error saving order: {e}")
-                                                return Response({"message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-                                            
-                                        except Exception as e:
-                                            logging.error(f"Unexpected error: {e}")
-                                            return Response({"message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                                        # Create a Razorpay order
+                                        razorpay_order_id = create_razorpay_order(total_amount)
+                                        return Response({
+                                            "message": "Razorpay order created successfully.",
+                                            "razorpay_order_id": razorpay_order_id,
+                                        }, status=status.HTTP_200_OK)
                                         
                                 except Exception as e:
+                                    logging.info(f"error {e}")
                                     return Response({"message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
                         
                         try:
-
-
                             total_free_quantity = 0
                             for item in user_cart:
                                 if item.product.pk in matched_product_pks:
@@ -2305,224 +2171,160 @@ class CreateOrder(APIView):
                                 if not address:
                                     return Response({"message": "Address not found"}, status=status.HTTP_404_NOT_FOUND)
 
+                                # Calculate the total amount before applying the coupon
+                                total_amount = total_cart_value
+                                 
                                 coupon_code = request.data.get('coupon_code')
-                                coupon = None
-                                if coupon_code:
-                                    try:
-                                        coupon = Coupon.objects.get(code=coupon_code)
-                                    except Coupon.DoesNotExist:
-                                        return Response({"message": "Invalid coupon code"}, status=status.HTTP_400_BAD_REQUEST)
+                                coupon = None  # Initialize coupon as None
 
-                                    if coupon.status != 'Active':
+                                if coupon_code:
+                                    coupon = Coupon.objects.filter(code=coupon_code).first()
+                                    if not coupon or coupon.status != 'Active':
                                         return Response({"message": "Invalid or inactive coupon"}, status=status.HTTP_400_BAD_REQUEST)
+
+                                # Calculate the total amount before applying the coupon
+                                try:
+                                    if coupon:
+                                        discount_amount = apply_coupon(coupon.code, total_amount, cart_items)
+                                        total_amount -= discount_amount
+                                except ValueError as e:
+                                    return Response({"message": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
                                 payment_method = request.data.get('payment_method')
                                 if not payment_method:
                                     return Response({"message": "Payment method is required"}, status=status.HTTP_400_BAD_REQUEST)
                                 if payment_method not in ['COD', 'razorpay']:
                                     return Response({"message": "Invalid payment method"}, status=status.HTTP_400_BAD_REQUEST)
-
+                                
                                 try:
-                                    with transaction.atomic():
-                                        order = Order.objects.create(
-                                            customer=user,
-                                            address=address,
-                                            status='pending',
-                                            payment_method=payment_method,
-                                        )
-
-                                        for item in cart_items:
-                                            # Fetch active offers related to the product or its category
-                                            offers = OfferSchedule.objects.filter(
-                                                Q(offer_active=True) &
-                                                (Q(offer_products=item.product.pk) | Q(offer_category=item.product.category.pk))
-                                            )
-                                            
-                                            # Fetch discount-approved products or categories
-                                            discount_products = OfferSchedule.objects.filter(
-                                                Q(offer_active=True) & Q(is_active=False) &
-                                                (Q(discount_approved_products=item.product.pk) | Q(discount_approved_category=item.product.category.pk))
-                                            )
-
-                                            # Collect offer details
-                                            offer_details = []
-                                            for offer in offers:
-                                                offer_detail = f"{offer.offer_type} {offer.get_option} GET {offer.get_value} {offer.method}"
-                                                offer_details.append(offer_detail)
-
-                                            # Collect discount details
-                                            discount_details = []
-                                            if discount_products.exists():
-                                                discount_details.append("Discount Allowed")
-
-                                            # Combine offer and discount details into a single string
-                                            offer_type_string = ", ".join(offer_details + discount_details) if offer_details or discount_details else "No offer"
-
-                                            # Create the order item with offer details
-                                            OrderItem.objects.create(
+                                    if payment_method == "COD":
+                                        with transaction.atomic():
+                                            order = Order.objects.create(
                                                 customer=user,
-                                                order=order,
-                                                product=item.product,
-                                                quantity=item.quantity,
-                                                price=item.product.salePrice,
-                                                color=item.color,
-                                                size=item.size,
-                                                offer_type=offer_type_string  # Include the offer details in the order item
+                                                address=address,
+                                                status='pending',
+                                                payment_method=payment_method,
+                                                coupon=coupon if coupon else None 
+
                                             )
 
-                                            if item.product.type == "single":
-                                                check_color = ProductColorStock.objects.filter(product=item.product, color=item.color)
-                                                if check_color is None:
-                                                    return Response({"message": "Color not found"}, status=status.HTTP_400_BAD_REQUEST)
-                                                for stock in check_color:
-                                                    if stock.stock >= item.quantity:
-                                                        stock.stock -= item.quantity
-                                                        stock.save()
-                                            else:
-                                                product_variants = ProductVariant.objects.filter(product=item.product, color=item.color)
-                                                if not product_variants.exists():
-                                                    return Response({"message": f"No variants found for {item.product.name} - {item.color}"}, status=status.HTTP_404_NOT_FOUND)
+                                            for item in cart_items:
+                                                # Fetch active offers related to the product or its category
+                                                offers = OfferSchedule.objects.filter(
+                                                    Q(offer_active=True) &
+                                                    (Q(offer_products=item.product.pk) | Q(offer_category=item.product.category.pk))
+                                                )
+                                                
+                                                # Fetch discount-approved products or categories
+                                                discount_products = OfferSchedule.objects.filter(
+                                                    Q(offer_active=True) & Q(is_active=False) &
+                                                    (Q(discount_approved_products=item.product.pk) | Q(discount_approved_category=item.product.category.pk))
+                                                )
 
-                                                for variant in product_variants:
-                                                    size_stocks = ProductVarientSizeStock.objects.filter(product_variant=variant, size=item.size)
-                                                    for stock in size_stocks:
-                                                        if stock.stock >= item.quantity:
-                                                            stock.stock -= item.quantity
-                                                            stock.save()
-                                                            break
-                                                        else:
-                                                            return Response({"message": f"Insufficient stock for {item.product.name} - {item.color} - {item.size}"}, status=status.HTTP_400_BAD_REQUEST)
-                                                        
+                                                # Collect offer details
+                                                offer_details = []
+                                                for offer in offers:
+                                                    offer_detail = f"{offer.offer_type} {offer.get_option} GET {offer.get_value} {offer.method}"
+                                                    offer_details.append(offer_detail)
 
-                                        cart_items_list = [
-                                        {
-                                            'product_name': item.product.name,
-                                            'quantity': item.quantity,
-                                            'price': item.product.salePrice,
-                                            'image':item.product.image.url
-                                        }
-                                        for item in cart_items
+                                                # Collect discount details
+                                                discount_details = []
+                                                if discount_products.exists():
+                                                    discount_details.append("Discount Allowed")
 
-                                        ]
+                                                # Combine offer and discount details into a single string
+                                                offer_type_string = ", ".join(offer_details + discount_details) if offer_details or discount_details else "No offer"
 
-                                        try:
-                                            # Initial check for total amount and apply shipping charge if applicable
-                                            if total_cart_value is None or not isinstance(total_cart_value, Decimal):
-                                                return Response({"error": "Invalid total amount."}, status=status.HTTP_400_BAD_REQUEST)
+                                                # Create the order item with offer details
+                                                OrderItem.objects.create(
+                                                    customer=user,
+                                                    order=order,
+                                                    product=item.product,
+                                                    quantity=item.quantity,
+                                                    price=item.product.salePrice,
+                                                    color=item.color,
+                                                    size=item.size,
+                                                    offer_type=offer_type_string  # Include the offer details in the order item
+                                                )
 
-                                            if total_cart_value <= Decimal('500.00'):
-                                                shipping_charge = Decimal('60.00')
-                                                total_cart_value += shipping_charge
+                                                if item.product.type == "single":
+                                                    check_color = ProductColorStock.objects.filter(product=item.product, color=item.color)
+                                                    if not check_color.exists():
+                                                        return Response({"message": "Color not found"}, status=status.HTTP_400_BAD_REQUEST)
+                                                    update_single_product_stock(check_color, item)
+                                                else:
+                                                    update_variant_stock(item)
 
-                                                order.shipping_charge = shipping_charge
+                                        
 
-                                            # Apply the coupon if present
-                                            if coupon:
-                                                try:
-                                                    if coupon.coupon_type == 'Percentage':
-                                                        discount_amount = (coupon.discount / 100) * total_cart_value
-                                                    elif coupon.coupon_type == 'Fixed Amount':
-                                                        discount_amount = coupon.discount
-                                                    else:
-                                                        return Response({"error": "Invalid coupon type."}, status=status.HTTP_400_BAD_REQUEST)
+                                        # Determine shipping charge based on total_amount
+                                        if total_amount <= Decimal('500.00'):
+                                            order.shipping_charge = Decimal('60.00')
+                                        else:
+                                            order.shipping_charge = Decimal('0.00')
 
-                                                    if discount_amount > total_cart_value:
-                                                        return Response({"error": "Discount exceeds total amount."}, status=status.HTTP_400_BAD_REQUEST)
+                                        # Add COD charge
+                                        order.cod_charge = Decimal('40.00')
+                                        total_amount += order.shipping_charge + order.cod_charge
 
-                                                    total_cart_value -= discount_amount
-                                                    order.coupon = coupon
-                                                except Exception as e:
-                                                    logging.error(f"Error applying coupon: {e}")
-                                                    return Response({"error": "Error applying coupon.", "details": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                                        # Update order total amount and save
+                                        order.total_amount = total_amount
+                                        order.save()
 
-                                            # Add COD charge if payment method is COD
+                                        # Send order email and delete cart items
+                                        send_order_email(order, cart_items_list)
+                                        cart_items.delete()
 
-                                            logging.debug(f"Initial total_cart_value: {total_cart_value}")
+                                        # Serialize the order data and return response
+                                        serializer = OrderSerializer(order)
+                                        return Response({"message": "Order success", "data": serializer.data}, status=status.HTTP_201_CREATED)
 
+                                    else:
+                                        
+                                        logging.info(f"Total amount before applying shipping and coupon: {total_amount}")
 
-                                            if payment_method == 'COD':
-                                                cod_charge = Decimal('40.00')
-                                                total_cart_value += cod_charge
-
-                                                order.cod_charge = cod_charge
-
-                                            # If payment method is Razorpay, create a Razorpay order
-                                            if payment_method == 'razorpay':
-                                                razorpay_client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
-                                                try:
-                                                    razorpay_order = razorpay_client.order.create({
-                                                        'amount': int(total_cart_value* 100),
-                                                        'currency': 'INR',
-                                                        'payment_capture': 1
-                                                    })
-                                                    razorpay_order_id = razorpay_order['id']
-                                                    order.razorpay_order_id = razorpay_order_id
-                                                    order.save()
-                                                    return Response({
-                                                        "message": "Razorpay order created successfully.",
-                                                        "razorpay_order_id": razorpay_order_id,
-                                                        "order_id": order.order_id
-                                                    }, status=status.HTTP_200_OK)
-                                                except Exception as e:
-                                                    logging.error(f"Razorpay order creation error: {e}")
-                                                    return Response({"error": "Error creating Razorpay order.", "details": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-                                            order.total_amount = total_cart_value
-                                            order.save()
-
-                                            try:
-                                                order.save()
-                                                logging.debug(f"Order saved successfully with total amount: {order.total_amount}")
-
-                                                cart_items.delete()
-
-                                                # Send order creation email
-                                                try:
-                                                    email_subject = 'New Order Created'
-                                                    email_body = render_to_string('new_order.html', {'order': order, 'user_cart': cart_items_list})
-                                                    email = EmailMessage(subject=email_subject, body=email_body, from_email=settings.EMAIL_HOST_USER, to=[settings.EMAIL_HOST_USER])
-                                                    email.content_subtype = 'html'
-                                                    email.send()
-                                                except Exception as email_error:
-                                                    logging.error(f"Error sending email: {email_error}")
-                                                    return Response({"message": "Order saved but failed to send email.", "data": OrderSerializer(order).data}, status=status.HTTP_201_CREATED)
-
-                                                # Return success response
-                                                serializer = OrderSerializer(order)
-                                                return Response({"message": "Order success", "data": serializer.data}, status=status.HTTP_201_CREATED)
-                                            
-                                            except Exception as e:
-                                                logging.error(f"Error saving order: {e}")
-                                                return Response({"message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-                                            
-                                        except Exception as e:
-                                            logging.error(f"Unexpected error: {e}")
-
-                                            return Response({"message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                                        # Create a Razorpay order
+                                        razorpay_order_id = create_razorpay_order(total_amount)
+                                        
+                                        return Response({
+                                            "message": "Razorpay order created successfully.",
+                                            "razorpay_order_id": razorpay_order_id,
+                                        }, status=status.HTTP_200_OK)
+                                        
                                 except Exception as e:
+                                    logging.info(f"error {e}")
                                     return Response({"message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
                         except Exception as e:
+                            logging.info(f"error {e}")
                             return Response({"message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
                     else:
                         return Response({"message":"No matching offer type found"})
                 except Exception as e :
+                    logging.info(f"error {e}")
                     return Response({"message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         
         address = Address.objects.filter(pk=pk, user=user).first()
         if not address:
             return Response({"message": "Address not found"}, status=status.HTTP_404_NOT_FOUND)
+        
+        total_amount = sum(item.product.salePrice * item.quantity for item in cart_items)
 
         coupon_code = request.data.get('coupon_code')
-        coupon = None
-        if coupon_code:
-            try:
-                coupon = Coupon.objects.filter(code=coupon_code).first()
-            except Coupon.DoesNotExist:
-                return Response({"message": "Invalid coupon code"}, status=status.HTTP_400_BAD_REQUEST)
+        coupon = None  # Initialize coupon as None
 
-            if coupon.status != 'Active':
+        if coupon_code:
+            coupon = Coupon.objects.filter(code=coupon_code).first()
+            if not coupon or coupon.status != 'Active':
                 return Response({"message": "Invalid or inactive coupon"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Calculate the total amount before applying the coupon
+        try:
+            if coupon:
+                discount_amount = apply_coupon(coupon.code, total_amount, cart_items)
+                total_amount -= discount_amount
+        except ValueError as e:
+            return Response({"message": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         payment_method = request.data.get('payment_method')
         if not payment_method:
@@ -2530,180 +2332,277 @@ class CreateOrder(APIView):
         if payment_method not in ['COD', 'razorpay']:
             return Response({"message": "Invalid payment method"}, status=status.HTTP_400_BAD_REQUEST)
 
-        try:
-            with transaction.atomic():
-                order = Order.objects.create(
-                    customer=user,
-                    address=address,
-                    status='pending',
-                    payment_method=payment_method
-                )
-
-                total_amount = 0
-                for item in cart_items:
-                    order_item = OrderItem.objects.create(
-                        customer=user,
-                        order=order,
-                        product=item.product,
-                        quantity=item.quantity,
-                        price=item.product.salePrice,
-                        color=item.color,
-                        size=item.size
-                    )
-
-                    if item.product.type == "single":
-                        check_color = ProductColorStock.objects.filter(product=item.product, color=item.color)
-                        if check_color is None :
-                            return Response({"message": "Color not found"}, status=status.HTTP_400_BAD_REQUEST)
-                        for stock in check_color :
-                            if stock.stock >= item.quantity:
-                                stock.stock -= item.quantity
-                                stock.save()
-
-                    else :
-                        product_variants = ProductVariant.objects.filter(product=item.product, color=item.color)
-
-                        if not product_variants.exists():
-                            return Response({"message": f"No variants found for {item.product.name} - {item.color}"}, status=status.HTTP_404_NOT_FOUND)
-
-                        for variant in product_variants:
-                            # Filter the size stocks related to the current variant
-                            size_stocks = ProductVarientSizeStock.objects.filter(product_variant=variant, size=item.size)
-                            
-                            for stock in size_stocks:
-                                if stock.stock >= item.quantity:
-                                    # Update stock
-                                    stock.stock -= item.quantity
-                                    stock.save()
-                                    break  # Break out of the inner loop if stock is updated
-                                else:
-                                    return Response({"message": f"Insufficient stock for {item.product.name} - {item.color} - {item.size}"}, status=status.HTTP_400_BAD_REQUEST)
-
-                    total_amount += item.product.salePrice * item.quantity
-
-               
-
-                cart_items_list = [
-                {
-                    'product_name': item.product.name,
-                    'quantity': item.quantity,
-                    'price': item.product.salePrice,
-                    'image':item.product.image.url
-                }
-                for item in cart_items
-
-                ]
+        
+        cart_items_list = [
+            
+            {
                 
-
-                try:
-                    # Initial check for total amount and apply shipping charge if applicable
-                    if total_amount is None or not isinstance(total_amount, Decimal):
-                        return Response({"error": "Invalid total amount."}, status=status.HTTP_400_BAD_REQUEST)
-
-                    if total_amount <= Decimal('500.00'):
-                        shipping_charge = Decimal('00.00')
-                        total_amount += shipping_charge
-
-                        order.shipping_charge = shipping_charge
-
-
-
-                    # Apply the coupon if present
-                    if coupon:
-                        try:
-                            if coupon.coupon_type == 'Percentage':
-                                discount_amount = (coupon.discount / 100) * total_amount
-                            elif coupon.coupon_type == 'Fixed Amount':
-                                discount_amount = coupon.discount
-                            else:
-                                return Response({"error": "Invalid coupon type."}, status=status.HTTP_400_BAD_REQUEST)
-
-                            if discount_amount > total_amount:
-                                return Response({"error": "Discount exceeds total amount."}, status=status.HTTP_400_BAD_REQUEST)
-
-                            total_amount -= discount_amount
-                            order.coupon = coupon
-                        except Exception as e:
-                            logging.error(f"Error applying coupon: {e}")
-                            return Response({"error": "Error applying coupon.", "details": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-                    # Add COD charge if payment method is COD
-
-                    logging.debug(f"Initial total_amount: {total_amount}")
-
+                'name': item.product.name,
+                'quantity': item.quantity,
+                'price': item.product.salePrice,
+                'image':item.product.image.url
+            }
+            
+            for item in cart_items]
+        
+        
+        try:
+            if payment_method == "COD":
+                with transaction.atomic():
+                    order = Order.objects.create(
+                        customer=user,
+                        address=address,
+                        status='pending',
+                        payment_method=payment_method,
+                        coupon=coupon if coupon else None 
+                    )
 
                     
 
-                    # Add COD charge if payment method is COD
-                    if payment_method == 'COD':
-                        cod_charge = Decimal('40.00')
-                        total_amount += cod_charge
-                        order.cod_charge = cod_charge
+                    for item in cart_items:
+                        order_item = OrderItem.objects.create(
+                            customer=user,
+                            order=order,
+                            product=item.product,
+                            quantity=item.quantity,
+                            price=item.product.salePrice,
+                            color=item.color,
+                            size=item.size
+                        )
 
-                    # If payment method is Razorpay, create a Razorpay order
-                    if payment_method == 'razorpay':
-                        razorpay_client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
-                        try:
-                            razorpay_order = razorpay_client.order.create({
-                                'amount': int(total_amount * 100),
-                                'currency': 'INR',
-                                'payment_capture': 1
-                            })
-                            razorpay_order_id = razorpay_order['id']
-                            order.razorpay_order_id = razorpay_order_id
-                            order.save()
-                            return Response({
-                                "message": "Razorpay order created successfully.",
-                                "razorpay_order_id": razorpay_order_id,
-                                "order_id": order.order_id
-                            }, status=status.HTTP_200_OK)
-                        except Exception as e:
-                            logging.error(f"Razorpay order creation error: {e}")
-                            return Response({"error": "Error creating Razorpay order.", "details": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                        if item.product.type == "single":
+                            check_color = ProductColorStock.objects.filter(product=item.product, color=item.color)
+                            if not check_color.exists():
+                                return Response({"message": "Color not found"}, status=status.HTTP_400_BAD_REQUEST)
+                            update_single_product_stock(check_color, item)
+                        else:
+                            update_variant_stock(item)
+                            
+                            
+                    
+                                    
+
+                    if total_amount <= Decimal('500.00'):
+                        order.shipping_charge = Decimal('60.00')
+                    else:
+                        order.shipping_charge = Decimal('0.00')
+
+                    order.cod_charge = Decimal('40.00')
+                    total_amount += order.shipping_charge + order.cod_charge
 
                     order.total_amount = total_amount
                     order.save()
 
-                    try:
-                        email_subject = 'New Order Created'
-                        email_body = render_to_string('new_order.html', {'order': order, 'user_cart': cart_items_list})
-                        email = EmailMessage(subject=email_subject, body=email_body, from_email=settings.EMAIL_HOST_USER, to=[settings.EMAIL_HOST_USER])
-                        email.content_subtype = 'html'
-                        email.send()
-                        cart_items.delete()
-                    except Exception as email_error:
-                        logging.error(f"Error sending email: {email_error}")
+                    send_order_email(order, cart_items_list)
+                    cart_items.delete()
 
                     serializer = OrderSerializer(order)
                     return Response({"message": "Order success", "data": serializer.data}, status=status.HTTP_201_CREATED)
 
-                except Exception as e:
-                    logging.error(f"Order creation error: {e}")
-                    return Response({"message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-                    
+
+            else:
+                # Log the calculated total amount for tracking purposes
+                logging.info(f"Total amount before applying shipping and coupon: {total_amount}")
+                
+                razorpay_order_id = create_razorpay_order(total_amount)
+                
+                return Response({
+                    "message": "Razorpay order created successfully.",
+                    "razorpay_order_id": razorpay_order_id,
+                }, status=status.HTTP_200_OK)
+
         except Exception as e:
             return Response({"message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+def update_single_product_stock(check_color, item):
+    for stock in check_color:
+        if stock.stock >= item.quantity:
+            stock.stock -= item.quantity
+            stock.save()
+            break
+    else:
+        raise ValueError(f"Insufficient stock for {item.product.name} - {item.color}")
+
+def update_variant_stock(item):
+    product_variants = ProductVariant.objects.filter(product=item.product, color=item.color)
+    if not product_variants.exists():
+        raise ValueError(f"No variants found for {item.product.name} - {item.color}")
+
+    for variant in product_variants:
+        size_stocks = ProductVarientSizeStock.objects.filter(product_variant=variant, size=item.size)
+        for stock in size_stocks:
+            if stock.stock >= item.quantity:
+                stock.stock -= item.quantity
+                stock.save()
+                break
+        else:
+            raise ValueError(f"Insufficient stock for {item.product.name} - {item.color} - {item.size}")
+
+
+
+
+def apply_coupon(coupon_code, total_amount, cart_items):
+
+    # Fetch a single coupon from the database or raise a 404 error
+    check_coupon = get_object_or_404(Coupon, code=coupon_code)
+
+    # Validate the coupon
+    if not check_coupon.is_valid():
+        raise ValueError("Coupon is invalid or inactive.")
+
+    is_applicable = False
+    approved_products = []
+
+    # Get applicable product and category IDs
+    applicable_products = set(check_coupon.discount_product.values_list('id', flat=True))
+    applicable_categories = set(check_coupon.discount_category.values_list('id', flat=True))
+
+    # Check cart items against the coupon's applicable products/categories
+    for cart_item in cart_items:
+        product = cart_item.product
+
+        if product.id in applicable_products or product.category.pk in applicable_categories:
+            approved_products.append(product)
+            is_applicable = True
+
+    if not is_applicable:
+        raise ValueError("Coupon is not applicable to the products in your cart.")
+
+    # Calculate total price of approved products
+    total_approved_products_price = sum(cart_item.product.salePrice * cart_item.quantity for cart_item in cart_items if cart_item.product in approved_products)
+
+    # Calculate discount based on coupon type
+    if check_coupon.coupon_type == 'Percentage':
+        discount_amount = (check_coupon.discount / 100) * total_approved_products_price
+    elif check_coupon.coupon_type == 'Fixed Amount':
+        discount_amount = min(check_coupon.discount, total_approved_products_price)
+    else:
+        raise ValueError("Invalid coupon type.")
+
+    # Ensure the discount does not exceed the total amount
+    if discount_amount > total_amount:
+        raise ValueError("Discount exceeds total amount.")
+
+    return discount_amount
+
+
+
+
+
+
+def send_order_email(order, cart_items_list):
+    try:
+        # Email details
+        email_subject = 'New Order Created'
+        
+        # Render the email template with order and cart details
+        email_body = render_to_string('new_order.html', {'order': order, 'user_cart': cart_items_list})
+        
+        # List of recipient emails: admin and the user's email
+        recipient_list = [settings.EMAIL_HOST_USER, order.customer.email]  # Assuming order.customer.email is the user's email
+        
+        # Create and send the email
+        email = EmailMessage(
+            subject=email_subject, 
+            body=email_body, 
+            from_email=settings.EMAIL_HOST_USER, 
+            to=recipient_list
+        )
+        email.content_subtype = 'html'  # Specify HTML content type
+        email.send()
+
+    except Exception as email_error:
+        # Log the error if email fails
+        logging.error(f"Error sending email: {email_error}")
+
+def create_razorpay_order(total_amount):
+    # Validate total_amount
+    if total_amount <= 0:
+        raise ValueError("Total amount must be greater than 0")
+    
+    if total_amount <= 500:
+        total_amount += 60  # Add ₹60 shipping charge
+    
+    try:
+        # Initialize Razorpay client
+        razorpay_client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
+
+        # Create Razorpay order
+        razorpay_order = razorpay_client.order.create({
+            'amount': int(total_amount * 100),  # Amount in paise
+            'currency': 'INR',
+            'payment_capture': 1  # Auto capture
+        })
+
+        # Return Razorpay order ID
+        _id = razorpay_order['id']
+        return _id
+
+    except razorpay.errors.BadRequestError as e:
+        raise ValueError("Invalid Razorpay request.") from e
+
+    except Exception as e:
+        raise ValueError("An unexpected error occurred during Razorpay order creation.") from e
         
 
 
 class VerifyRazorpayPaymentAPIView(APIView):
     def post(self, request, *args, **kwargs):
         try:
-            # Extract payment details from the request
+            token = request.headers.get('Authorization')
+            if not token:
+                return Response({"message": "Unauthorized"}, status=status.HTTP_401_UNAUTHORIZED)
+            
+            try:
+                user_token = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
+            except jwt.ExpiredSignatureError:
+                return Response({"message": "Token has expired"}, status=status.HTTP_401_UNAUTHORIZED)
+            except (jwt.DecodeError, jwt.InvalidTokenError):
+                return Response({"message": "Invalid token"}, status=status.HTTP_401_UNAUTHORIZED)
+
+            user_id = user_token.get('id')
+            if not user_id:
+                return Response({"message": "Invalid token"}, status=status.HTTP_401_UNAUTHORIZED)
+
+            user = Customer.objects.filter(pk=user_id).first()
+            if not user:
+                return Response({"message": "User not found"}, status=status.HTTP_404_NOT_FOUND)
+
+            cart_items = Cart.objects.filter(customer=user)
+            
+            if not cart_items.exists():
+                return Response({"message": "Cart is empty"}, status=status.HTTP_400_BAD_REQUEST)
+            
+             # Extract payment details from the request
             razorpay_order_id = request.data.get('order_id')
             razorpay_payment_id = request.data.get('payment_id')
             razorpay_signature = request.data.get('razorpay_signature')
             total_amount = Decimal(request.data.get('total_amount', 0))
+            coupon_code = request.data.get('coupon_code',None)
+            address_id = request.data.get('address_id')
+            shipping_charge = request.data.get('shipping_charge', 0)
+            
+            
+            
 
+            
+            
+            
+            
+            coupon = None
+            if coupon_code:
+                coupon = Coupon.objects.filter(code=coupon_code).first()
+                if not coupon:
+                    return Response({"message": "Invalid coupon code"}, status=status.HTTP_400_BAD_REQUEST)
+            
+            address = Address.objects.filter(pk=address_id, user=user).first()
+            if not address:
+                return Response({"message": "Address not found"}, status=status.HTTP_404_NOT_FOUND)
+            
            
 
-            # Fetch the order from the database
-            order = Order.objects.get(razorpay_order_id=razorpay_order_id)
-
-            # Check if the payment is already processed
-            if order.payment_id:
-                return Response({"error": "Payment already processed."}, status=status.HTTP_400_BAD_REQUEST)
-
+        
+        
             # Verify Razorpay signature
             razorpay_client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
             try:
@@ -2716,20 +2615,95 @@ class VerifyRazorpayPaymentAPIView(APIView):
                 # Fetch payment details from Razorpay
                 payment_details = razorpay_client.payment.fetch(razorpay_payment_id)
                 if payment_details['status'] == 'captured':
-                    order.payment_id = razorpay_payment_id
-                    order.total_amount = total_amount
-                    order.save()
-                    return Response({"message": "Payment already captured."}, status=status.HTTP_200_OK)
+                    with transaction.atomic():
+                        order = Order.objects.create(
+                            customer=user,
+                            address=address,
+                            status='pending',
+                            payment_method='razorpay',
+                            razorpay_order_id=razorpay_order_id,
+                            payment_id = razorpay_payment_id,
+                            total_amount = total_amount,
+                            coupon=coupon if coupon else None ,
+                            shipping_charge = shipping_charge
+                        )
 
-                # Capture the payment
+                        for item in cart_items:
+                            order_item = OrderItem.objects.create(
+                                customer=user,
+                                order=order,
+                                product=item.product,
+                                quantity=item.quantity,
+                                price=item.product.salePrice,
+                                color=item.color,
+                                size=item.size
+                            )
+
+                            if item.product.type == "single":
+                                check_color = ProductColorStock.objects.filter(product=item.product, color=item.color)
+                                if check_color is None :
+                                    return Response({"message": "Color not found"}, status=status.HTTP_400_BAD_REQUEST)
+                                for stock in check_color :
+                                    if stock.stock >= item.quantity:
+                                        stock.stock -= item.quantity
+                                        stock.save()
+
+                            else :
+                                product_variants = ProductVariant.objects.filter(product=item.product, color=item.color)
+
+                                if not product_variants.exists():
+                                    return Response({"message": f"No variants found for {item.product.name} - {item.color}"}, status=status.HTTP_404_NOT_FOUND)
+
+                                for variant in product_variants:
+                                    # Filter the size stocks related to the current variant
+                                    size_stocks = ProductVarientSizeStock.objects.filter(product_variant=variant, size=item.size)
+                                    
+                                    for stock in size_stocks:
+                                        if stock.stock >= item.quantity:
+                                            # Update stock
+                                            stock.stock -= item.quantity
+                                            stock.save()
+                                            break  # Break out of the inner loop if stock is updated
+                                        else:
+                                            return Response({"message": f"Insufficient stock for {item.product.name} - {item.color} - {item.size}"}, status=status.HTTP_400_BAD_REQUEST)
+
+                            total_amount += item.product.salePrice * item.quantity
+
+                    
+
+                        cart_items_list = [
+                        {
+                            'product_name': item.product.name,
+                            'quantity': item.quantity,
+                            'price': item.product.salePrice,
+                            'image':item.product.image.url
+                        }
+                        for item in cart_items
+
+                        ]
+                        send_order_razorpay_email(order, cart_items_list)
+                        serializer = OrderSerializer(order)
+                        return Response({"message": "Payment already captured.","success":serializer.data}, status=status.HTTP_200_OK)
+
                 payment_capture_response = razorpay_client.payment.capture(razorpay_payment_id, int(total_amount * 100))
 
                 # Check if the payment capture was successful
                 if payment_capture_response['status'] == 'captured':
-                    # Update the order with payment details
                     order.payment_id = razorpay_payment_id
                     order.total_amount = total_amount
                     order.save()
+                    
+                    cart_items_list = [
+                        {
+                            'product_name': item.product.name,
+                            'quantity': item.quantity,
+                            'price': item.product.salePrice,
+                            'image':item.product.image.url
+                        }
+                        for item in cart_items
+
+                        ]
+                    send_order_razorpay_email(order, cart_items_list)
 
                     return Response({"message": "Payment verified and captured successfully."}, status=status.HTTP_200_OK)
                 else:
@@ -2737,13 +2711,39 @@ class VerifyRazorpayPaymentAPIView(APIView):
 
             except razorpay.errors.SignatureVerificationError as e:
                 return Response({"error": "Invalid payment signature."}, status=status.HTTP_400_BAD_REQUEST)
-
-        except Order.DoesNotExist:
-            return Response({"error": "Order not found."}, status=status.HTTP_404_NOT_FOUND)
+            except Order.DoesNotExist:
+                return Response({"error": "Order not found."}, status=status.HTTP_404_NOT_FOUND)
 
         except Exception as e:
             logging.error(f"Error during Razorpay payment verification: {e}")
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+        
+        
+def send_order_razorpay_email(order, cart_items_list):
+    try:
+        # Email details
+        email_subject = 'New Order Created'
+        
+        # Render the email template with order and cart details
+        email_body = render_to_string('new_order.html', {'order': order, 'user_cart': cart_items_list})
+        
+        # List of recipient emails: admin and the user's email
+        recipient_list = [settings.EMAIL_HOST_USER, order.customer.email]  # Assuming order.customer.email is the user's email
+        
+        # Create and send the email
+        email = EmailMessage(
+            subject=email_subject, 
+            body=email_body, 
+            from_email=settings.EMAIL_HOST_USER, 
+            to=recipient_list
+        )
+        email.content_subtype = 'html'  # Specify HTML content type
+        email.send()
+
+    except Exception as email_error:
+        # Log the error if email fails
+        logging.error(f"Error sending email: {email_error}")
 
 
 class RelatedProduct(APIView):
@@ -3357,7 +3357,6 @@ class SendOtpView(APIView):
 
         if not phone_number:
             return Response({'error': 'Phone number is required'}, status=status.HTTP_400_BAD_REQUEST)
-
         phone_number = phone_number.strip()  # Clean up phone number
 
         # Validate phone number format (example: check if it's a 10-digit number)
@@ -3433,7 +3432,6 @@ class VerifyOtpView(APIView):
 
 
 
-
 class AllProductsSchemaAPIView(APIView):
     def get(self, request, *args, **kwargs):
         products = Product.objects.all().order_by('pk')
@@ -3484,6 +3482,9 @@ class AllProductsSchemaAPIView(APIView):
 
 
 
+from django.shortcuts import render
+import json
+
 class ProductSchemaAPIView(APIView):
     def get(self, request, slug, *args, **kwargs):
         # Fetch the product by slug
@@ -3506,10 +3507,8 @@ class ProductSchemaAPIView(APIView):
         else:
             product_data = ProductVariant.objects.filter(product=product).values('color', 'image1', 'image2', 'image3', 'image4', 'image5')
 
-        # Prepare image list for schema
-        images = []
-        for item in product_data:
-            images.extend([item['image1'], item['image2'], item['image3'], item['image4'], item['image5']])
+        # Prepare image list for schema, filter out None values
+        images = [image for item in product_data for image in [item['image1'], item['image2'], item['image3'], item['image4'], item['image5']] if image]
 
         # Construct the schema
         schema = {
@@ -3539,7 +3538,16 @@ class ProductSchemaAPIView(APIView):
             }
         }
 
-        return JsonResponse(schema, safe=False)
+        # Convert schema to JSON
+        schema_json = json.dumps(schema)
+
+        # Render HTML with the schema embedded in the <script> tag
+        context = {
+            "schema_json": schema_json,
+            "product": product,
+        }
+        return render(request, 'product_schema.html', context)
+
 
 
 
