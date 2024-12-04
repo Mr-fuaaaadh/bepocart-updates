@@ -255,7 +255,7 @@ class OrderInvoiceBillSerializer(serializers.ModelSerializer):
         model = Order
         fields = [
             'id', 'customer', 'total_amount', 'created_at','coupon' ,'order_id','free_quantity',
-            'updated_at', 'status', 'address', 'customerImage', 
+            'updated_at', 'status', 'address', 'customerImage','shipping_charge','cod_charge',
             'customerName', 'couponName', 'couponType', 'payment_method', 'payment_id','lastName','address','email','phone','pincode','city','state','coupon_value'
         ]
 

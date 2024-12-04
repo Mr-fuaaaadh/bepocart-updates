@@ -26,7 +26,32 @@ SECRET_KEY = 'django-insecure-dna_1db29i5lj00a5p-q6))^wge_@2c&wtb8fksg(771kakg0@
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ["https://bepocart.in","*"]
+CSRF_TRUSTED_ORIGINS = ["https://bepocart.in"]
+APPEND_SLASH = False
+
+
+CORS_ALLOW_CREDENTIALS = False
+
+CORS_ALLOW_HEADERS = [
+    'content-type',
+    'accept',
+    'authorization',
+    'x-csrftoken',
+]
+
+SESSION_COOKIE_SECURE = True
+CSRF_COOKIE_SECURE = True
+
+CORS_ALLOWED_ORIGINS = [
+    "https://bepocart.in",
+    "https://bepocart.com"
+]
+
+
+CORS_ALLOW_ALL_ORIGINS = True
+
+SECURE_COOKIE = True
 
 
 # Application definition
