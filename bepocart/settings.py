@@ -27,7 +27,7 @@ SECRET_KEY = 'django-insecure-dna_1db29i5lj00a5p-q6))^wge_@2c&wtb8fksg(771kakg0@
 DEBUG = True
 
 ALLOWED_HOSTS = ['*']
-CSRF_TRUSTED_ORIGINS = ["http://localhost:3000"]
+CSRF_TRUSTED_ORIGINS = ["https://bepocart.in"]
 APPEND_SLASH = False
 
 
@@ -44,11 +44,11 @@ CORS_ALLOW_HEADERS = [
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
 
-# CORS_ALLOWED_ORIGINS = [
-#     "https://bepocart.in",
-#     "https://bepocart.com",
-#     "http://localhost:3000",
-# ]
+CORS_ALLOWED_ORIGINS = [
+    "https://bepocart.in",
+    "https://bepocart.com",
+    "http://localhost:3000",
+]
 
 
 CORS_ALLOW_ALL_ORIGINS = True
