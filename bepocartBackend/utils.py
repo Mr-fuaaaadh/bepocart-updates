@@ -48,6 +48,7 @@ def send_otp(phone_number, otp):
 
 
     message = f'Your verification code for login to Bepocart is {otp}'
+    print(message)
 
     url = 'https://www.smsalert.co.in/api/push.json'
 

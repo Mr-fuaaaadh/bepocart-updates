@@ -1621,6 +1621,7 @@ class CreateOrder(APIView):
 
                         if coupon_code:
                             coupon = Coupon.objects.filter(code=coupon_code).first()
+                            print("this")
                             if not coupon or coupon.status != 'Active':
                                 return Response({"message": "Invalid or inactive coupon"}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1630,6 +1631,7 @@ class CreateOrder(APIView):
                                 discount_amount = apply_coupon(coupon.code, total_amount, cart_items)
                                 total_amount -= discount_amount
                         except ValueError as e:
+                            print("this")
                             return Response({"message": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
                         payment_method = request.data.get('payment_method')
@@ -2447,7 +2449,7 @@ def apply_coupon(coupon_code, total_amount, cart_items):
     check_coupon = get_object_or_404(Coupon, code=coupon_code)
 
     # Validate the coupon
-    if not check_coupon.is_valid():
+    if not check_coupon:
         raise ValueError("Coupon is invalid or inactive.")
 
     is_applicable = False

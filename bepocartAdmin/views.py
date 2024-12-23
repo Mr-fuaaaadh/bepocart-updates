@@ -2073,9 +2073,11 @@ class AdminOfferCreating(APIView):
             if serializer.is_valid():
                 serializer.save()
                 return Response({"status": "success", "message": "Offer created successfully"}, status=status.HTTP_201_CREATED)
+            print(serializer.errors)
             return Response({"status": "error", "message": "Invalid data", "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
         except Exception as e:
+            
             return Response({"status": "error", "message": "Internal server error", "details": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 

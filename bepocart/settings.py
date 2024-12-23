@@ -26,12 +26,13 @@ SECRET_KEY = 'django-insecure-dna_1db29i5lj00a5p-q6))^wge_@2c&wtb8fksg(771kakg0@
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ["https://bepocart.in","*"]
-CSRF_TRUSTED_ORIGINS = ["https://bepocart.in"]
+ALLOWED_HOSTS = ['*']
+CSRF_TRUSTED_ORIGINS = ["http://localhost:3000"]
 APPEND_SLASH = False
 
 
-CORS_ALLOW_CREDENTIALS = False
+CORS_ALLOW_CREDENTIALS = True
+
 
 CORS_ALLOW_HEADERS = [
     'content-type',
@@ -43,10 +44,11 @@ CORS_ALLOW_HEADERS = [
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
 
-CORS_ALLOWED_ORIGINS = [
-    "https://bepocart.in",
-    "https://bepocart.com"
-]
+# CORS_ALLOWED_ORIGINS = [
+#     "https://bepocart.in",
+#     "https://bepocart.com",
+#     "http://localhost:3000",
+# ]
 
 
 CORS_ALLOW_ALL_ORIGINS = True
@@ -68,8 +70,10 @@ INSTALLED_APPS = [
     'bepocartBackend',
     'corsheaders',
 ]
+JWT_EXPIRATION_MINUTES = 1440
 
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -112,10 +116,15 @@ REST_FRAMEWORK = {
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.mysql',
+        'NAME': 'bepocart_db',  
+        'USER': 'bepocart', 
+        'PASSWORD': 'bepocart123@#',  
+        'HOST': '184.168.106.44',  
+        'PORT': '3306', 
     }
 }
+
 
 
 # Password validation
