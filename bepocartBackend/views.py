@@ -2583,12 +2583,6 @@ class VerifyRazorpayPaymentAPIView(APIView):
             shipping_charge = request.data.get('shipping_charge', 0)
             
             
-            
-
-            
-            
-            
-            
             coupon = None
             if coupon_code:
                 coupon = Coupon.objects.filter(code=coupon_code).first()
@@ -2681,7 +2675,6 @@ class VerifyRazorpayPaymentAPIView(APIView):
                         for item in cart_items
 
                         ]
-                        send_order_razorpay_email(order, cart_items_list)
                         serializer = OrderSerializer(order)
                         return Response({"message": "Payment already captured.","success":serializer.data}, status=status.HTTP_200_OK)
 
@@ -2703,7 +2696,6 @@ class VerifyRazorpayPaymentAPIView(APIView):
                         for item in cart_items
 
                         ]
-                    send_order_razorpay_email(order, cart_items_list)
 
                     return Response({"message": "Payment verified and captured successfully."}, status=status.HTTP_200_OK)
                 else:
