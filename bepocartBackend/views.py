@@ -1691,13 +1691,13 @@ class CreateOrder(APIView):
                                             offer_type=offer_type_string  # Include the offer details in the order item
                                         )
 
-                                        if item.product.type == "single":
-                                            check_color = ProductColorStock.objects.filter(product=item.product, color=item.color)
-                                            if not check_color.exists():
-                                                return Response({"message": "Color not found"}, status=status.HTTP_400_BAD_REQUEST)
-                                            update_single_product_stock(check_color, item)
-                                        else:
-                                            update_variant_stock(item)
+                                        # if item.product.type == "single":
+                                        #     check_color = ProductColorStock.objects.filter(product=item.product, color=item.color)
+                                        #     if not check_color.exists():
+                                        #         return Response({"message": "Color not found"}, status=status.HTTP_400_BAD_REQUEST)
+                                        #     update_single_product_stock(check_color, item)
+                                        # else:
+                                        #     update_variant_stock(item)
                                             
                                 
 
@@ -1716,7 +1716,7 @@ class CreateOrder(APIView):
                                 order.save()
 
                                 # Send order email and delete cart items
-                                send_order_email(order, cart_items_list)
+                                # send_order_email(order, cart_items_list)
                                 cart_items.delete()
 
                                 # Serialize the order data and return response
@@ -1725,7 +1725,7 @@ class CreateOrder(APIView):
 
 
                             else:
-                                logging.info(f"Total amount before applying shipping and coupon: {total_amount}")
+                                print(f"Total amount before applying shipping and coupon: {total_amount}")
 
                                 # Create a Razorpay order
                                 razorpay_order_id = create_razorpay_order(total_amount)
@@ -1735,7 +1735,7 @@ class CreateOrder(APIView):
                                     "razorpay_order_id": razorpay_order_id,
                                 }, status=status.HTTP_200_OK)   
                         except Exception as e:
-                            logging.info(f"error {e}")
+                            print(f"error {e}")
                             return Response({"message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
                     else:
                         try:
@@ -1851,13 +1851,13 @@ class CreateOrder(APIView):
                                         )
 
                                         # Update stock based on the product type
-                                        if item.product.type == "single":
-                                            check_color = ProductColorStock.objects.filter(product=item.product, color=item.color)
-                                            if not check_color.exists():
-                                                return Response({"message": "Color not found"}, status=status.HTTP_400_BAD_REQUEST)
-                                            update_single_product_stock(check_color, item)
-                                        else:
-                                            update_variant_stock(item)
+                                        # if item.product.type == "single":
+                                        #     check_color = ProductColorStock.objects.filter(product=item.product, color=item.color)
+                                        #     if not check_color.exists():
+                                        #         return Response({"message": "Color not found"}, status=status.HTTP_400_BAD_REQUEST)
+                                        #     update_single_product_stock(check_color, item)
+                                        # else:
+                                        #     update_variant_stock(item)
                                             
 
 
@@ -1884,7 +1884,7 @@ class CreateOrder(APIView):
                                 return Response({"message": "Order success", "data": serializer.data}, status=status.HTTP_201_CREATED)
 
                             else:
-                                logging.info(f"Total amount before applying shipping and coupon: {total_amount}")
+                                print(f"Total amount before applying shipping and coupon: {total_amount}")
 
                                 # Create a Razorpay order
                                 razorpay_order_id = create_razorpay_order(total_amount)
@@ -1893,11 +1893,11 @@ class CreateOrder(APIView):
                                     "razorpay_order_id": razorpay_order_id,
                                 }, status=status.HTTP_200_OK)        
                         except Exception as e:
-                            logging.info(f"error {e}")
+                            print(f"error {e}")
                             return Response({"message": f"An error occurred during order processing: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
                 except Exception as e:
-                    logging.info(f"error {e}")
+                    print(f"error {e}")
                     return Response({"message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
             else:
@@ -2059,13 +2059,13 @@ class CreateOrder(APIView):
                                                     offer_type=offer_type_string  # Include the offer details in the order item
                                                 )
 
-                                                if item.product.type == "single":
-                                                    check_color = ProductColorStock.objects.filter(product=item.product, color=item.color)
-                                                    if not check_color.exists():
-                                                        return Response({"message": "Color not found"}, status=status.HTTP_400_BAD_REQUEST)
-                                                    update_single_product_stock(check_color, item)
-                                                else:
-                                                    update_variant_stock(item)
+                                                # if item.product.type == "single":
+                                                #     check_color = ProductColorStock.objects.filter(product=item.product, color=item.color)
+                                                #     if not check_color.exists():
+                                                #         return Response({"message": "Color not found"}, status=status.HTTP_400_BAD_REQUEST)
+                                                #     update_single_product_stock(check_color, item)
+                                                # else:
+                                                #     update_variant_stock(item)
                                                     
 
 
@@ -2093,7 +2093,7 @@ class CreateOrder(APIView):
                                         return Response({"message": "Order success", "data": serializer.data}, status=status.HTTP_201_CREATED)
 
                                     else:
-                                        logging.info(f"Total amount before applying shipping and coupon: {total_amount}")
+                                        print(f"Total amount before applying shipping and coupon: {total_amount}")
 
 
                                         # Create a Razorpay order
@@ -2104,7 +2104,7 @@ class CreateOrder(APIView):
                                         }, status=status.HTTP_200_OK)
                                         
                                 except Exception as e:
-                                    logging.info(f"error {e}")
+                                    print(f"error {e}")
                                     return Response({"message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
                         
                         try:
@@ -2247,13 +2247,13 @@ class CreateOrder(APIView):
                                                     offer_type=offer_type_string  # Include the offer details in the order item
                                                 )
 
-                                                if item.product.type == "single":
-                                                    check_color = ProductColorStock.objects.filter(product=item.product, color=item.color)
-                                                    if not check_color.exists():
-                                                        return Response({"message": "Color not found"}, status=status.HTTP_400_BAD_REQUEST)
-                                                    update_single_product_stock(check_color, item)
-                                                else:
-                                                    update_variant_stock(item)
+                                                # if item.product.type == "single":
+                                                #     check_color = ProductColorStock.objects.filter(product=item.product, color=item.color)
+                                                #     if not check_color.exists():
+                                                #         return Response({"message": "Color not found"}, status=status.HTTP_400_BAD_REQUEST)
+                                                #     update_single_product_stock(check_color, item)
+                                                # else:
+                                                #     update_variant_stock(item)
 
                                         
 
@@ -2281,7 +2281,7 @@ class CreateOrder(APIView):
 
                                     else:
                                         
-                                        logging.info(f"Total amount before applying shipping and coupon: {total_amount}")
+                                        print(f"Total amount before applying shipping and coupon: {total_amount}")
 
                                         # Create a Razorpay order
                                         razorpay_order_id = create_razorpay_order(total_amount)
@@ -2292,15 +2292,15 @@ class CreateOrder(APIView):
                                         }, status=status.HTTP_200_OK)
                                         
                                 except Exception as e:
-                                    logging.info(f"error {e}")
+                                    print(f"error {e}")
                                     return Response({"message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
                         except Exception as e:
-                            logging.info(f"error {e}")
+                            print(f"error {e}")
                             return Response({"message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
                     else:
                         return Response({"message":"No matching offer type found"})
                 except Exception as e :
-                    logging.info(f"error {e}")
+                    print(f"error {e}")
                     return Response({"message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         
@@ -2370,13 +2370,13 @@ class CreateOrder(APIView):
                             size=item.size
                         )
 
-                        if item.product.type == "single":
-                            check_color = ProductColorStock.objects.filter(product=item.product, color=item.color)
-                            if not check_color.exists():
-                                return Response({"message": "Color not found"}, status=status.HTTP_400_BAD_REQUEST)
-                            update_single_product_stock(check_color, item)
-                        else:
-                            update_variant_stock(item)
+                        # if item.product.type == "single":
+                        #     check_color = ProductColorStock.objects.filter(product=item.product, color=item.color)
+                        #     if not check_color.exists():
+                        #         return Response({"message": "Color not found"}, status=status.HTTP_400_BAD_REQUEST)
+                        #     update_single_product_stock(check_color, item)
+                        # else:
+                        #     update_variant_stock(item)
                             
                             
                     
@@ -2402,7 +2402,7 @@ class CreateOrder(APIView):
 
             else:
                 # Log the calculated total amount for tracking purposes
-                logging.info(f"Total amount before applying shipping and coupon: {total_amount}")
+                print(f"Total amount before applying shipping and coupon: {total_amount}")
                 
                 razorpay_order_id = create_razorpay_order(total_amount)
                 
@@ -2412,6 +2412,7 @@ class CreateOrder(APIView):
                 }, status=status.HTTP_200_OK)
 
         except Exception as e:
+            print(f"no Offer {e}")
             return Response({"message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 def update_single_product_stock(check_color, item):
@@ -2536,6 +2537,7 @@ def create_razorpay_order(total_amount):
 
         # Return Razorpay order ID
         _id = razorpay_order['id']
+        print(f"razorpay order ID  :{_id}")
         return _id
 
     except razorpay.errors.BadRequestError as e:
@@ -2623,6 +2625,9 @@ class VerifyRazorpayPaymentAPIView(APIView):
                         )
 
                         for item in cart_items:
+                            print(f"item {item.product.name}")
+                            print(f"price {item.quantity}")
+                            
                             order_item = OrderItem.objects.create(
                                 customer=user,
                                 order=order,
@@ -2678,7 +2683,7 @@ class VerifyRazorpayPaymentAPIView(APIView):
                         serializer = OrderSerializer(order)
                         return Response({"message": "Payment already captured.","success":serializer.data}, status=status.HTTP_200_OK)
 
-                payment_capture_response = razorpay_client.payment.capture(razorpay_payment_id, int(total_amount * 100))
+                payment_capture_response = razorpay_client.payment.capture(razorpay_payment_id, int(  * 100))
 
                 # Check if the payment capture was successful
                 if payment_capture_response['status'] == 'captured':
