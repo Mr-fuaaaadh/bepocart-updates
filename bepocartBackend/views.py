@@ -1725,7 +1725,6 @@ class CreateOrder(APIView):
 
 
                             else:
-                                print(f"Total amount before applying shipping and coupon: {total_amount}")
 
                                 # Create a Razorpay order
                                 razorpay_order_id = create_razorpay_order(total_amount)
@@ -1735,7 +1734,6 @@ class CreateOrder(APIView):
                                     "razorpay_order_id": razorpay_order_id,
                                 }, status=status.HTTP_200_OK)   
                         except Exception as e:
-                            print(f"error {e}")
                             return Response({"message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
                     else:
                         try:
@@ -1884,7 +1882,6 @@ class CreateOrder(APIView):
                                 return Response({"message": "Order success", "data": serializer.data}, status=status.HTTP_201_CREATED)
 
                             else:
-                                print(f"Total amount before applying shipping and coupon: {total_amount}")
 
                                 # Create a Razorpay order
                                 razorpay_order_id = create_razorpay_order(total_amount)
@@ -1893,11 +1890,9 @@ class CreateOrder(APIView):
                                     "razorpay_order_id": razorpay_order_id,
                                 }, status=status.HTTP_200_OK)        
                         except Exception as e:
-                            print(f"error {e}")
                             return Response({"message": f"An error occurred during order processing: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
                 except Exception as e:
-                    print(f"error {e}")
                     return Response({"message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
             else:
@@ -2093,7 +2088,6 @@ class CreateOrder(APIView):
                                         return Response({"message": "Order success", "data": serializer.data}, status=status.HTTP_201_CREATED)
 
                                     else:
-                                        print(f"Total amount before applying shipping and coupon: {total_amount}")
 
 
                                         # Create a Razorpay order
@@ -2104,7 +2098,6 @@ class CreateOrder(APIView):
                                         }, status=status.HTTP_200_OK)
                                         
                                 except Exception as e:
-                                    print(f"error {e}")
                                     return Response({"message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
                         
                         try:
@@ -2281,7 +2274,6 @@ class CreateOrder(APIView):
 
                                     else:
                                         
-                                        print(f"Total amount before applying shipping and coupon: {total_amount}")
 
                                         # Create a Razorpay order
                                         razorpay_order_id = create_razorpay_order(total_amount)
@@ -2292,15 +2284,12 @@ class CreateOrder(APIView):
                                         }, status=status.HTTP_200_OK)
                                         
                                 except Exception as e:
-                                    print(f"error {e}")
                                     return Response({"message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
                         except Exception as e:
-                            print(f"error {e}")
                             return Response({"message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
                     else:
                         return Response({"message":"No matching offer type found"})
                 except Exception as e :
-                    print(f"error {e}")
                     return Response({"message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         
@@ -2402,7 +2391,6 @@ class CreateOrder(APIView):
 
             else:
                 # Log the calculated total amount for tracking purposes
-                print(f"Total amount before applying shipping and coupon: {total_amount}")
                 
                 razorpay_order_id = create_razorpay_order(total_amount)
                 
@@ -2412,7 +2400,6 @@ class CreateOrder(APIView):
                 }, status=status.HTTP_200_OK)
 
         except Exception as e:
-            print(f"no Offer {e}")
             return Response({"message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 def update_single_product_stock(check_color, item):
@@ -2537,7 +2524,6 @@ def create_razorpay_order(total_amount):
 
         # Return Razorpay order ID
         _id = razorpay_order['id']
-        print(f"razorpay order ID  :{_id}")
         return _id
 
     except razorpay.errors.BadRequestError as e:
@@ -2625,8 +2611,6 @@ class VerifyRazorpayPaymentAPIView(APIView):
                         )
 
                         for item in cart_items:
-                            print(f"item {item.product.name}")
-                            print(f"price {item.quantity}")
                             
                             order_item = OrderItem.objects.create(
                                 customer=user,
