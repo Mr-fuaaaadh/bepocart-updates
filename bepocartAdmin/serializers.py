@@ -348,3 +348,15 @@ class BestSellerProductSerializer(serializers.ModelSerializer):
 
     def get_sale(self, obj):
         return "popular"
+    
+class VersionaddSerializer(serializers.ModelSerializer):
+    
+    class Meta:
+        model=Version 
+        fields=['version_name']
+
+class VersionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model=Version
+        fields=['version_name']
+          

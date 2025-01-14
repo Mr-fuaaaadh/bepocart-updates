@@ -98,6 +98,11 @@ urlpatterns = [
     path("offer/",AllOffers.as_view()),
 
     path('Bepocart-offer/<int:pk>/toggle-status/', toggle_offer_active.as_view(), name='toggle_offer_active'),
+    
+    path('Bepocart-version/add/',VersionAddView.as_view()),  
+    path('Bepocart-version/view/',VersionView.as_view()),
+    path('Bepocart-version/update/<int:pk>/',VersionUpdateView.as_view()),
+    
 
 
 

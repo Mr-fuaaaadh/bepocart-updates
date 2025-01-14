@@ -7,4 +7,5 @@ admin.site.register(Customer)
 admin.site.register(Product)
 admin.site.register(ProductColorStock)
 admin.site.register(Cart)
+admin.site.register(Version)
 

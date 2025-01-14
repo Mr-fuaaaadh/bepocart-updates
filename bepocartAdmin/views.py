@@ -2204,6 +2204,49 @@ class TotalSaledProductsView(APIView):
                 "error": "An unexpected error occurred.",
                 "details": str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+            
+class VersionAddView(APIView):
+    def post(self,request):
+        try:
+            version=VersionaddSerializer(data=request.data)
+            if version.is_valid():
+                version.save()
+                return Response({"status": "success", "message": "Version added successfully"}, status=status.HTTP_200_OK)
+            return Response({"status": "error", "errors": serializer.errors},status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            print(e)
+            return Response({"error": "Server Error", "details": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class VersionView(APIView):
+    def get(self,request):
+        try:
+            version=Version.objects.all()
+            serializer=VersionSerializer(version,many=True)
+            return Response({"status": "success", "data": serializer.data}, status=status.HTTP_200_OK)
+        except Exception as e:
+            print(e)
+            return Response({"error": "Server Error", "details": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR) 
+
+class VersionUpdateView(APIView):
+    def put(self,request,pk):
+        try:
+            version=Version.objects.get(pk=pk)
+            serializer=VersionSerializer(version,data=request.data)
+            if serializer.is_valid():
+                serializer.save()
+                return Response({"status": "success", "message": "Version updated successfully"}, status=status.HTTP_200_OK)
+            return Response({"status": "error", "errors": serializer.errors},status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            print(e)
+            return Response({"error": "Server Error", "details": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                
+        
+        
+                
+                
+                
+                
 
 
 

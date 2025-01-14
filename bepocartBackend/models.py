@@ -51,6 +51,7 @@ class Address(models.Model):
     city = models.CharField(max_length=250)
     state = models.CharField(max_length=250)
     name = models.CharField(max_length=100,null=True)
+    customer_name=models.CharField(max_length=100,null=True)
 
 
     class Meta :
@@ -94,6 +95,7 @@ class Coupon(models.Model):
     used_count = models.IntegerField(default=0)
     discount_product = models.ManyToManyField('bepocartAdmin.Product', blank=True)
     discount_category = models.ManyToManyField('bepocartAdmin.Subcategory', blank=True)
+    
 
     def __str__(self):
         return self.code
@@ -198,3 +200,6 @@ class Review(models.Model):
 
     class Meta :
         db_table = "Review"
+        
+        
+       
