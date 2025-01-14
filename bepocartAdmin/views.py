@@ -1004,9 +1004,6 @@ class OrderStatusUpdation(APIView):
 
                 order.status = new_status
                 order.save()
-
-                # send_order_status_email(order)
-
                 return Response({"status": "Order status updated successfully"}, status=status.HTTP_200_OK)
 
             except ExpiredSignatureError:
