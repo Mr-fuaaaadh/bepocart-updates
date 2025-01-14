@@ -239,7 +239,7 @@ class AdminCustomerViewSerilizers(serializers.ModelSerializer):
 
 class OrderInvoiceBillSerializer(serializers.ModelSerializer):
     customerImage = serializers.ImageField(source='customer.image')
-    customerName = serializers.CharField(source='customer.first_name')
+    customerName = serializers.CharField(source='address.customer_name')
     lastName = serializers.CharField(source='customer.last_name')
     address = serializers.CharField(source='address.address')
     email = serializers.CharField(source='address.email')
@@ -247,7 +247,7 @@ class OrderInvoiceBillSerializer(serializers.ModelSerializer):
     pincode = serializers.CharField(source='address.pincode')
     city = serializers.CharField(source='address.city') 
     state = serializers.CharField(source='address.state')
-    customername=serializers.CharField(source='address.customer_name')    
+   
     couponName = serializers.SerializerMethodField() 
     couponType = serializers.SerializerMethodField()  
     coupon_value = serializers.SerializerMethodField()
@@ -257,7 +257,7 @@ class OrderInvoiceBillSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'customer', 'total_amount', 'created_at','coupon' ,'order_id','free_quantity',
             'updated_at', 'status', 'address', 'customerImage','shipping_charge','cod_charge',
-            'customerName', 'couponName', 'couponType', 'payment_method', 'payment_id','lastName','address','email','phone','pincode','city','state', 'customername','coupon_value'
+            'customerName', 'couponName', 'couponType', 'payment_method', 'payment_id','lastName','address','email','phone','pincode','city','state','coupon_value'
         ]
 
     def get_coupon_value(self, obj):
