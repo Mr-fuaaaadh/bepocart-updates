@@ -280,3 +280,14 @@ class Notification(models.Model):
 
     def __str__(self):
         return f"Notification for {self.message}"
+    
+    
+    
+    
+class Version(models.Model):
+    version_name=models.CharField(max_length=200,null=True)  
+    
+    def __str__(self):
+        return self.version_name
+    
+    
