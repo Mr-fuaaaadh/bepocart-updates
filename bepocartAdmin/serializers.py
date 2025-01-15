@@ -173,7 +173,7 @@ class AdminOrderItemSerializers(serializers.ModelSerializer):
 
 class AdminOrderViewsSerializers(serializers.ModelSerializer):
     customerImage = serializers.ImageField(source='customer.image')
-    customerName = serializers.CharField(source='customer.first_name')
+    customerName = serializers.CharField(source='address.customer_name')
     couponName = serializers.SerializerMethodField() 
     couponType = serializers.SerializerMethodField() 
     address = serializers.CharField(source='address.address')
